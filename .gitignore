@@ -74,3 +74,11 @@ Thumbs.db
 .idea/
 .vscode/
 *.sublime-*
+
+# 8. 本地专用 handoff 文档与独立版本库 (不同步远端)
+handoff/
+instock/ENVIRONMENT_HANDOFF.md
+
+
+
+
