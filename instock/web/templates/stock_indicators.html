@@ -1,0 +1,14 @@
+{% extends "layout/indicators.html" %}
+{% block main_content %}
+<script type="text/javascript" src="/static/js/bokeh-3.2.0.min.js"></script>
+<script type="text/javascript" src="/static/js/bokeh-widgets-3.2.0.min.js"></script>
+<script type="text/javascript">
+    Bokeh.set_log_level("error");
+</script>
+{% for element in comp_list %}
+<div>
+    {% raw element["div"] %}
+    {% raw element["script"] %}
+</div>
+{% end %}
+{% end %}
