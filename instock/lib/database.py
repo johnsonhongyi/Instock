@@ -133,12 +133,20 @@ def update_db_from_df(data, table_name, where):
         for row in clean_df.itertuples(index=False, name=None)
     ]
 
-    with get_connection() as conn:
+    conn = get_connection()
+    if conn is None:
+        logging.error(f"database.update_db_from_df无法连接数据库：{table_name}表")
+        return
+    try:
         with conn.cursor() as db:
-            try:
-                db.executemany(sql, params_list)
-            except Exception as e:
-                logging.error(f"database.update_db_from_df批量处理异常：{table_name}表 {e}")
+            db.executemany(sql, params_list)
+    except Exception as e:
+        logging.error(f"database.update_db_from_df批量处理异常：{table_name}表 {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 # 检查表是否存在

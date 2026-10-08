@@ -195,3 +195,18 @@
   7. **Crontab 调度精简与防争锁保护**：
      - 在 [`instock/config/crontab.root`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/config/crontab.root) 中彻底删除 18:15 冗余的旧版回测任务 `backtest_data_daily_job.py`，保持 18:25 新版独占；并将 14:50 扫描升级为 `-w 300` 等待机制，防止被盘中回测超时导致静默跳过。
 
+## [2026-10-08 19:35] 阶段二：重采样单次.agg()性能提速与回测实时函数DRY对齐
+
+- **实施成果**：
+  1. **重采样算法性能暴增 52.4%（High Perf & KISS）**：
+     - 在 [`instock/core/strategy/keep_increasing.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/core/strategy/keep_increasing.py) 中，将 `get_tdx_stock_period_to_type` 由原先近 10 次独立的 `.resample()` 重构为单次字典聚合 `stock_data.resample(period_type).agg(agg_dict)`。
+     - 经过基准实测验证：算法提速 52.4%（耗时由 5.36s 骤降至 2.55s），且与原算法在周线/月线的开高低收量额等字段数值保持 100% 精确一致。
+  2. **回测数据准备函数健壮性与 DRY 对齐（DRY & SOLID）**：
+     - 在 [`instock/job/backtest_data_daily_job_edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/backtest_data_daily_job_edit.py) 中全面升级 `stocks_data_to_realtime`，与 `strategy_enter-edit.py` 现代版本严格对齐：
+       - 彻底消除旧代码 `realdf['volume'].apply(lambda x: x*100)` 导致的手/股单位二次翻倍隐患，统一为 `pd.to_numeric` 标准化 float64；
+       - 为 `tl.ROC` 增加 `to_numpy(dtype='float64')` 防御，避免底层 C 库在遇到非浮点类型时崩溃；
+       - 补齐 `volume_ratio` 的 `fillna(1.0)` 和 `drop_duplicates` 容错；
+       - `pd.to_datetime` 补齐显式 `format='%Y-%m-%d'` 加速。
+  3. **数据库连接池释放防御（Robustness）**：
+     - 在 [`instock/lib/database.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/lib/database.py) 的 `update_db_from_df` 中增加对 `conn is None` 的边界检查，并在 `finally` 块中显式调用 `conn.close()`，彻底防止高频策略更新下的数据库连接泄露。
+

@@ -46,44 +46,44 @@ def pandas_df(conn, sql):
     # conn.close()
     return df
 
-def stocks_data_to_realtime(date,stocks_data,realdf):
+def stocks_data_to_realtime(date, stocks_data, realdf):
     realdf['open'] = realdf['open_price']
     realdf['high'] = realdf['high_price']
     realdf['low'] = realdf['low_price']
     realdf['quote_change'] = realdf['change_rate']
-    # realdf['close'] = realdf['pre_close_price']
     realdf['close'] = realdf['new_price']
     realdf['amount'] = realdf['deal_amount']
     realdf['turnover'] = realdf['turnoverrate']
-    realdf['volume'] = realdf['volume'].apply(lambda x: x*100)
-    realdf['amount'] = realdf['amount'].apply(lambda x: x*100)
-    
+    realdf['volume'] = pd.to_numeric(realdf['volume'], errors='coerce').fillna(0).astype('float64')
+    realdf['amount'] = pd.to_numeric(realdf['amount'], errors='coerce').fillna(0).astype('float64')
+
     h_col = tuple(tbs.CN_STOCK_HIST_DATA['columns'])
-    # h_col.append('p_change')
-    # ('2023-05-11', '603058', '永吉股份')
-    stocks_data2={}
-    rundate = date.strftime("%Y-%m-%d")
-    # rundate = date
-    for key in stocks_data:
-        # date1 = key[0]
-        code  = key[1]
+    rundate = str(date.strftime("%Y-%m-%d"))
+    realdf['code'] = realdf['code'].astype(str).str.split('.').str[0].str.zfill(6)
+    realdf = realdf.drop_duplicates('code', keep='last').set_index('code', drop=False)
+
+    for key in list(stocks_data):
+        code = str(key[1]).split('.')[0].zfill(6)
         name = key[2]
-        pr_value = stocks_data[key]
-        pr_value = pr_value[pr_value.date < str(date)[:10]]
-        # scol = stocks_data[key].columns.values
-        data = realdf.loc[realdf.code==code,h_col]
-        # pr_value = pr_value.append(data).reset_index(drop=True)
-        
-        #debug realtime
-        # pr_value = pr_value[:-1]
-        #debug realtime
+        pr_value = stocks_data.pop(key)
+        target_day = pd.Timestamp(date).normalize()
+        history_days = pd.to_datetime(pr_value['date'], format='%Y-%m-%d', errors='coerce')
+        pr_value = pr_value.loc[history_days < target_day]
+        new_key = (rundate, code, name)
+        if code not in realdf.index:
+            continue
+        data = realdf.loc[[code], h_col].copy()
+        if 'volume_ratio' in realdf.columns:
+            data['volume_ratio'] = realdf.loc[code, 'volume_ratio']
         pr_value = pd.concat([pr_value, data], axis=0).reset_index(drop=True)
-        pr_value.loc[:, 'p_change'] = tl.ROC(pr_value['close'].values, 1)
-        pr_value.loc[:, 'p_change'] = pr_value['p_change'].fillna(0.0)
+        if 'volume_ratio' in pr_value.columns:
+            pr_value['volume_ratio'] = pr_value['volume_ratio'].fillna(1.0)
+        pr_value.loc[:, 'p_change'] = tl.ROC(pr_value['close'].to_numpy(dtype='float64'), 1)
+        pr_value['p_change'] = pr_value['p_change'].fillna(0.0)
         pr_value['date'] = pd.to_datetime(pr_value.date, format='%Y-%m-%d')
-        stocks_data2[(rundate,code,name)] = pr_value
-        
-    return stocks_data2
+        stocks_data[new_key] = pr_value
+
+    return stocks_data
 
 from instock.core.stockfetch import fetch_stocks
 import talib as tl

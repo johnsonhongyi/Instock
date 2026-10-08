@@ -162,120 +162,78 @@ def get_tdx_stock_period_to_type(stock_data, period_day='W-FRI', periods=5, ncol
     Returns:
         _type_: _description_
     """
-    #快速日期处理
-    #https://www.likecs.com/show-204682607.html
     period_type = period_day
     if 'date' in stock_data.columns:
         stock_data.set_index('date', inplace=True)
-    stock_data['date'] = stock_data.index
-    lastday = str(stock_data.date.values[-1])[:10]
-    lastday2 = str(stock_data.date.values[-2])[:10]
-    # duration_day = get_today_duration(lastday2,lastday)
-    # print("duration:%s"%(duration_day))
-    
-    # if duration_day > 3:
-    #     if 'date' in stock_data.columns:
-    #         stock_data = stock_data.drop(['date'], axis=1)
-    #     return stock_data.reset_index()
-    
-    # indextype = True if stock_data.index.dtype == 'datetime64[ns]' else False
-    # if cct.get_work_day_status() and 915 < cct.get_now_time_int() < 1500:
-    #     stock_data = stock_data[stock_data.index < cct.get_today()]
+    lastday = str(stock_data.index.values[-1])[:10]
+    lastday2 = str(stock_data.index.values[-2])[:10]
 
-    if stock_data.index.name == 'date':
-        stock_data.index = pd.to_datetime(stock_data.index, format='%Y-%m-%d')
-    elif 'date' in stock_data.columns:
-        stock_data.set_index('date', inplace=True)
-        stock_data.sort_index(ascending=True, inplace=True)
-        stock_data.index = pd.to_datetime(stock_data.index, format='%Y-%m-%d')
-    # else:
-    #     log.error("index.name not date,pls check:%s" % (stock_data[:1]))
+    stock_data.index = pd.to_datetime(stock_data.index, format='%Y-%m-%d', errors='coerce')
+    stock_data.sort_index(ascending=True, inplace=True)
 
-    period_stock_data = stock_data.resample(period_type).last()
-    # period_stock_data['percent']=stock_data['percent'].resample(period_type,how=lambda x:(x+1.0).prod()-1.0)
-    # print stock_data.index[0],stock_data.index[-1]
-    # period_stock_data.index =
-    # pd.DatetimeIndex(start=stock_data.index.values[0],end=stock_data.index.values[-1],freq='BM')
-
-    period_stock_data['open'] = stock_data[
-        'open'].resample(period_type).first()
-    period_stock_data['high'] = stock_data[
-        'high'].resample(period_type).max()
-    period_stock_data['low'] = stock_data[
-        'low'].resample(period_type).min()
-
-    lastWeek1 = str(period_stock_data['open'].index.values[-1])[:10]
-    lastweek2 = str(period_stock_data['open'].index.values[-2])[:10]
-    if ratiodays:
-        if period_day == 'W-FRI':
-            # print(lastWeek1,lastweek2,lastday,lastday2)
-            d1 = datetime.datetime.strptime(lastWeek1, '%Y-%m-%d').date()
-            d2 = datetime.datetime.strptime(lastday, '%Y-%m-%d').date()
-            duratio = abs((d1 - d2).days)
-            ratio_d = (5 - (duratio % 5)) / 5
-            # print("ratio_d:%s %s"%(ratio_d,lastday))
-        elif period_day.find('W') >= 0:
-            # print(lastWeek1,lastweek2,lastday,lastday2)
-            d1 = datetime.datetime.strptime(lastday, '%Y-%m-%d').date()
-            d2 = datetime.datetime.strptime(lastweek2, '%Y-%m-%d').date()
-            duratio = abs((d1 - d2).days)
-            ratio_d = duratio / 5
-            # print("ratio_d:%s %s"%(ratio_d,lastday))
-        elif period_day == 'BM':
-            # daynow = '2023-04-26'
-            # lastday = '2023-04-23'
-            # print(lastWeek1,lastweek2,lastday,lastday2)
-            # print((str(datetime.datetime.strptime(lastWeek1, '%Y-%m-%d').date() - datetime.datetime.strptime(lastday, '%Y-%m-%d').date())[:2]))
-            d1 = datetime.datetime.strptime(lastday, '%Y-%m-%d').date()
-            d2 = datetime.datetime.strptime(lastweek2, '%Y-%m-%d').date()
-            duratio = abs((d1 - d2).days)
-            ratio_d = (30 - (duratio % 30)) / 30
-            # print("ratio_d:%s %s dura:%s"%(ratio_d,lastday,duratio))
-        elif period_day.find('M') >= 0:
-            ratio_d = 1
-            
-    else:
-        ratio_d = 1
-        print(ratio_d)
-        
+    agg_dict = {
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'amount': 'sum',
+        'volume': 'sum',
+    }
     if ncol is not None:
         for co in ncol:
-            period_stock_data[co] = stock_data[co].resample(period_type).sum()
-            if ratiodays:
-                period_stock_data[co] = period_stock_data[co].apply(lambda x: round(x / ratio_d, 1))
-                
-    # else:
-    period_stock_data['amount'] = stock_data[
-        'amount'].resample(period_type).sum()
-    period_stock_data['volume'] = stock_data[
-        'volume'].resample(period_type).sum()
-    if ratiodays:
-        period_stock_data['amount'] = period_stock_data['amount'].apply(lambda x: round(x / ratio_d, 1))
-        period_stock_data['volume'] = period_stock_data['volume'].apply(lambda x: round(x / ratio_d, 1))
-                
-    # period_stock_data['turnover']=period_stock_data['vol']/(period_stock_data['traded_market_value'])/period_stock_data['close']
-    period_stock_data.index = stock_data['date'].resample(period_type).last().index
-    # print period_stock_data.index[:1]
+            if co in stock_data.columns and co not in agg_dict:
+                agg_dict[co] = 'sum'
+    for col in stock_data.columns:
+        if col not in agg_dict and col != 'date':
+            agg_dict[col] = 'last'
+
+    period_stock_data = stock_data.resample(period_type).agg(agg_dict)
+
+    if len(period_stock_data) >= 2:
+        lastWeek1 = str(period_stock_data.index.values[-1])[:10]
+        lastweek2 = str(period_stock_data.index.values[-2])[:10]
+        if ratiodays:
+            if period_day == 'W-FRI':
+                d1 = datetime.datetime.strptime(lastWeek1, '%Y-%m-%d').date()
+                d2 = datetime.datetime.strptime(lastday, '%Y-%m-%d').date()
+                duratio = abs((d1 - d2).days)
+                ratio_d = (5 - (duratio % 5)) / 5
+            elif period_day.find('W') >= 0:
+                d1 = datetime.datetime.strptime(lastday, '%Y-%m-%d').date()
+                d2 = datetime.datetime.strptime(lastweek2, '%Y-%m-%d').date()
+                duratio = abs((d1 - d2).days)
+                ratio_d = duratio / 5
+            elif period_day == 'BM':
+                d1 = datetime.datetime.strptime(lastday, '%Y-%m-%d').date()
+                d2 = datetime.datetime.strptime(lastweek2, '%Y-%m-%d').date()
+                duratio = abs((d1 - d2).days)
+                ratio_d = (30 - (duratio % 30)) / 30
+            elif period_day.find('M') >= 0:
+                ratio_d = 1
+            else:
+                ratio_d = 1
+        else:
+            ratio_d = 1
+    else:
+        ratio_d = 1
+
+    if ratiodays and ratio_d != 0 and ratio_d != 1:
+        if 'amount' in period_stock_data.columns:
+            period_stock_data['amount'] = period_stock_data['amount'].apply(lambda x: round(x / ratio_d, 1))
+        if 'volume' in period_stock_data.columns:
+            period_stock_data['volume'] = period_stock_data['volume'].apply(lambda x: round(x / ratio_d, 1))
+        if ncol is not None:
+            for co in ncol:
+                if co in period_stock_data.columns:
+                    period_stock_data[co] = period_stock_data[co].apply(lambda x: round(x / ratio_d, 1))
+
     if 'code' in period_stock_data.columns:
         period_stock_data = period_stock_data[period_stock_data['code'].notnull()]
     core_cols = [c for c in ('open', 'close', 'high', 'low', 'volume', 'amount') if c in period_stock_data.columns]
     period_stock_data = period_stock_data.dropna(subset=core_cols if core_cols else None)
     period_stock_data = period_stock_data.fillna(0.0)
-    # period_stock_data.reset_index(inplace=True)
-    # period_stock_data.set_index('date',inplace=True)
-    # print period_stock_data.columns,period_stock_data.index.name
-    # and period_stock_data.index.dtype != 'datetime64[ns]')
-    
-    # if not indextype and period_stock_data.index.name == 'date':
-    #     # stock_data.index = pd.to_datetime(stock_data.index, format='%Y-%m-%d')
-    #     period_stock_data.index = [str(x)[:10] for x in period_stock_data.index]
-    #     period_stock_data.index.name = 'date'
-    # else:
-    #     if 'date' in period_stock_data.columns:
-    #         period_stock_data = period_stock_data.drop(['date'], axis=1)
-    
     if 'date' in period_stock_data.columns:
-            period_stock_data = period_stock_data.drop(['date'], axis=1)
+        period_stock_data = period_stock_data.drop(['date'], axis=1)
     return period_stock_data.reset_index()
 
 def check_rsi_status(data,threshold=60,period_day=False):
