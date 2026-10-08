@@ -164,3 +164,12 @@
   4. **规范同步与实盘数据验证**：
      - 依据 SOP 完成本地 Git 提交（`2413916`），通过 Bundle 将容器 HEAD 完全对齐至 `2413916`。
      - 完成今日已选出股票的 `rate_1` 实时回填，查询 MariaDB 验证：今日 `cn_stock_strategy_enter` 等全部策略命中股票的 `rate_1` 均已 100% 成功展示为今日实际涨跌幅（如山东路桥 +4.26%、陆家嘴 +9.99%、彩蝶实业 +10.01% 等）。
+
+## [2026-10-08 18:12] 收益率数值规范为标准2位浮点数并支持涨跌着色
+
+- **用户反馈**：页面“1日收益率”显示的是多位浮点数（例如 `-0.980392`、`4.25894`、`10` 等），不符合金融表格标准的 2 位小数显示规范。
+- **完成动作**：
+  1. **入库源头截断（DRY/KISS）**：在 [`instock/job/strategy_enter-edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/strategy_enter-edit.py) 中的 `_populate_intraday_rate` 映射时，对 `change_rate` 统一调用 `.round(2)`，入库即为规整的 2 位浮点数。
+  2. **前端模板格式化与视觉增强**：在 [`instock/web/templates/stock_web.html`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/web/templates/stock_web.html)（及 `stock_web-src.html`）中为所有 `rate_`（1日~100日收益率）列增加专属渲染器，使用 `parseFloat(data).toFixed(2)` 保留 2 位小数，并支持红涨绿跌（正数红、负数绿、零黑）显示。
+  3. **数据库历史数据清洗**：在 MariaDB 中执行全策略表清洗，将今日所有策略命中记录的 `rate_1` 批量更新为 `ROUND(rate_1, 2)`。
+  4. **双端同步与验证**：提交本地 Git（`7f703c2`），通过 Git Bundle 快进容器 HEAD 至 `7f703c2`，并在数据库实测验证 9 只样本股全部规整呈现为 `4.26`、`2.60`、`9.72`、`9.99` 等。代码已推送到远程 GitHub。
