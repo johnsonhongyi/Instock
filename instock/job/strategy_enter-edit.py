@@ -236,8 +236,8 @@ def _populate_intraday_rate(data, date):
             from instock.core.singleton_stock import stock_data
             s_data = stock_data(date).get_data(date)
             if s_data is not None and not s_data.empty and 'code' in s_data.columns and 'change_rate' in s_data.columns:
-                change_map = dict(zip(s_data['code'].astype(str), s_data['change_rate']))
-                data['rate_1'] = data['code'].astype(str).map(change_map)
+                change_map = dict(zip(s_data['code'].astype(str), s_data['change_rate'].round(2)))
+                data['rate_1'] = data['code'].astype(str).map(change_map).round(2)
     except Exception as e:
         logging.warning("填充当日1日收益率异常：%s", e)
 

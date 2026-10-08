@@ -99,6 +99,17 @@
                         return type === 'display' ? '<span style="color:' + colour + '">' + val + '</span>' : val;
                     }
                 },
+                {% elif column.startswith('rate_') %}
+                {
+                    "data": "{{ column }}", "render": function (data, type, row, meta) {
+                        if (data === null || data === undefined || data === '') return '';
+                        const num = parseFloat(data);
+                        if (isNaN(num)) return data;
+                        let colour = num < 0 ? 'green' : (num > 0 ? 'red' : 'black');
+                        const formatted = num.toFixed(2);
+                        return type === 'display' ? '<span style="color:' + colour + '">' + formatted + '</span>' : formatted;
+                    }
+                },
                 {% else %}
                 {"data": "{{ column }}"},
                 {% end %}
