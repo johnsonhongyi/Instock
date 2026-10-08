@@ -128,8 +128,11 @@ def stocks_data_to_realtime(date,stocks_data,realdf):
         # pr_value = pr_value[:-1]
         #debug realtime
         pr_value = pd.concat([pr_value, data], axis=0).reset_index(drop=True)
+        if 'volume_ratio' in pr_value.columns:
+            pr_value['volume_ratio'] = pr_value['volume_ratio'].fillna(1.0)
         pr_value = _normalize_talib_columns(pr_value)
         pr_value.loc[:, 'p_change'] = tl.ROC(pr_value['close'].to_numpy(dtype='float64'), 1)
+        pr_value['p_change'] = pr_value['p_change'].fillna(0.0)
         pr_value['date'] = pd.to_datetime(pr_value.date, format='%Y-%m-%d')
         stocks_data[new_key] = pr_value
         
@@ -151,7 +154,7 @@ def build_strategy_snapshot(date):
     run_date = now_time.date()
     requested_date = date.date() if isinstance(date, datetime.datetime) else date
     if (requested_date == run_date and trd.is_trade_date(run_date)
-            and trd.is_open(now_time) and not trd.is_close(now_time)):
+            and (trd.is_open(now_time) or now_time.time() >= datetime.time(9, 25, 0)) and not trd.is_close(now_time)):
         logging.info("strategy_enter_readldf：%s", date)
         realdf = stock_data(date).get_data(date, refresh=True)
         if realdf is None or realdf.empty:
@@ -328,6 +331,14 @@ def main():
             executor.submit(runt.run_with_args, prepare, strategy)
 
 
+def _current_strategy_date():
+    now = datetime.datetime.now()
+    today = now.date()
+    if trd.is_trade_date(today) and now.time() >= datetime.time(9, 25, 0):
+        return today
+    return trd.get_trade_date_last()[0]
+
+
 def _strategy_run_dates():
     if len(sys.argv) == 3:
         run_date = datetime.datetime.strptime(sys.argv[1], "%Y-%m-%d").date()
@@ -342,7 +353,7 @@ def _strategy_run_dates():
         dates = [datetime.datetime.strptime(value, "%Y-%m-%d").date()
                  for value in sys.argv[1].split(",")]
         return [date for date in dates if trd.is_trade_date(date)]
-    return [trd.get_trade_date_last()[0]]
+    return [_current_strategy_date()]
 
 
 def strategy_enter(small_strategies_only=False):
@@ -352,8 +363,7 @@ def strategy_enter(small_strategies_only=False):
         os.environ['INSTOCK_PREPARED_HISTORY_CACHE_DIR'] = cache_dir
         os.environ['INSTOCK_COLUMNAR_HISTORY_CACHE'] = '1'
         stf.stock_hist_cache_path = cache_dir
-        today = datetime.date.today()
-        epoch = today if trd.is_trade_date(today) else trd.get_trade_date_last()[0]
+        epoch = _current_strategy_date()
         os.environ['INSTOCK_HISTORY_CACHE_EPOCH'] = str(epoch)
     selected = os.environ.get('INSTOCK_SELECTED_STRATEGIES')
     stats = RunStatistics(small_strategies_only,
@@ -383,7 +393,7 @@ def _stream_strategy_enter(small, stats, selected):
     if not dates:
         raise RuntimeError('指定范围内没有交易日')
     epoch = os.environ.get('INSTOCK_HISTORY_CACHE_EPOCH')
-    latest = str(trd.get_trade_date_last()[0])
+    latest = str(_current_strategy_date())
     for date in dates:
         previous = date - datetime.timedelta(days=1)
         for _ in range(20):
