@@ -117,3 +117,24 @@
        - 14:30 回测独占启动，充裕运行，彻底消除 `flock -n -E 75` 锁争抢；
        - 14:50 补跑尾盘策略扫描，捕捉收盘前异动。
      - 新配置保存于本地版本库 [`instock/config/crontab.root`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/config/crontab.root)，并已同步至容器生效且重载 cron 服务。
+
+## [2026-10-08 15:55] 本地与远程版本库分叉排查与无冲突 Rebase 线性收敛
+
+- **用户疑问**：VS Code 源代码管理面板出现 `Sync Changes 1 ↓ 3 ↑`，询问本地为何与线上出现分叉/冲突，按理本地一直是最新的。
+- **排查根因**：
+  1. 远程 `origin/master` 包含 1 个先前提交 `9602ac8 chore(instock): remove root JSONData symlink from repository`（仅删除了根目录冗余的软链接 `JSONData`）。
+  2. 本地在此前基础上有 3 个提交（`5426ae9`、`fe18b0f`、`36e8789`，包含策略修复、代码全量管理与 Crontab 重排）。
+  3. 双方修改的文件集完全没有重叠（本地代码早已没有该软链接），属于单纯的 Git 分支发散，没有任何实质代码冲突。
+- **完成动作**：
+  1. 执行 `git rebase origin/master`，将本地 3 个提交平滑、线性地重放于远程提交之上。
+  2. 零代码冲突，历史完全线性化，本地当前领先 `origin/master` 3 个提交（`ahead of 'origin/master' by 3 commits`）。
+  3. 再次校验本地核心文件 SHA256，所有修复代码与配置 100% 保持权威最新状态。
+
+## [2026-10-08 16:50] 沉淀免Docker打包标准化同步工作流SOP至部署交接文档
+
+- **任务背景**：用户指示将经过生产实战检验的“本地权威版本库 -> 容器零打包热同步与离线Bundle对齐”全套流程沉淀编写进本地部署交接文档（`ENVIRONMENT_HANDOFF.md`），以形成固化的操作规范，避免日后反复确认和不必要的容器镜像重构。
+- **完成动作**：
+  1. **文档修订落地**：在本地 [`instock/ENVIRONMENT_HANDOFF.md`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/ENVIRONMENT_HANDOFF.md)（及硬链接 `handoff/ENVIRONMENT_HANDOFF.md`）中完整追加两部分内容：
+     - **今日（2026-10-08）热修复全记录**：包括策略开市日期 Bug、均线多头越界 Bug、策略源码全量纳管与 .gitignore 纠偏、盘中回测 14:58 日期 Bug 与 14:30 独占无锁调度优化；
+     - **标准开发与生产同步操作流水线（Zero-Rebuild SOP）**：涵盖策略脚本挂载秒级热更、Job/核心脚本持锁原子替换、以及基于 Git Bundle 的内网零网络提交历史快进对齐指令。
+  2. **本地独立库版本留存**：在独立版本库 `handoff/` 中完成提交：`f6a635e docs: 沉淀零打包免重建容器标准化同步工作流SOP及1008热修复全记录`。物理隔绝远端 GitHub，本地版本历史完整可追溯。
