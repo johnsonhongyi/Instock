@@ -3,6 +3,7 @@
 
 import logging
 import os
+import datetime
 import pymysql
 from sqlalchemy import create_engine
 from sqlalchemy.types import NVARCHAR
@@ -123,28 +124,22 @@ def update_db_from_df(data, table_name, where):
                     sql = update_string
                     sql_where = where_string
                     for index, col in enumerate(cols):
+                        val = row[index]
                         if col in where:
-                            if len(sql_where) == len(where_string):
-                                if type(row[index]) == str:
-                                    sql_where = f'''{sql_where}`{col}` = '{row[index]}' '''
-                                else:
-                                    sql_where = f'''{sql_where}`{col}` = {row[index]} '''
+                            prefix = "" if len(sql_where) == len(where_string) else " and "
+                            if isinstance(val, (str, datetime.date, datetime.datetime)):
+                                sql_where = f'''{sql_where}{prefix}`{col}` = '{val}' '''
+                            elif val is None or (isinstance(val, float) and val != val):
+                                sql_where = f'''{sql_where}{prefix}`{col}` IS NULL '''
                             else:
-                                if type(row[index]) == str:
-                                    sql_where = f'''{sql_where} and `{col}` = '{row[index]}' '''
-                                else:
-                                    sql_where = f'''{sql_where} and `{col}` = {row[index]} '''
+                                sql_where = f'''{sql_where}{prefix}`{col}` = {val} '''
                         else:
-                            if type(row[index]) == str:
-                                if row[index] is None or row[index] != row[index]:
-                                    sql = f'''{sql}`{col}` = NULL, '''
-                                else:
-                                    sql = f'''{sql}`{col}` = '{row[index]}', '''
+                            if val is None or (isinstance(val, float) and val != val):
+                                sql = f'''{sql}`{col}` = NULL, '''
+                            elif isinstance(val, (str, datetime.date, datetime.datetime)):
+                                sql = f'''{sql}`{col}` = '{val}', '''
                             else:
-                                if row[index] is None or row[index] != row[index]:
-                                    sql = f'''{sql}`{col}` = NULL, '''
-                                else:
-                                    sql = f'''{sql}`{col}` = {row[index]}, '''
+                                sql = f'''{sql}`{col}` = {val}, '''
                     sql = f'{sql[:-2]}{sql_where}'
                     db.execute(sql)
             except Exception as e:
