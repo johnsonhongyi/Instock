@@ -46,46 +46,8 @@ def pandas_df(conn, sql):
     # conn.close()
     return df
 
-def stocks_data_to_realtime(date, stocks_data, realdf):
-    realdf['open'] = realdf['open_price']
-    realdf['high'] = realdf['high_price']
-    realdf['low'] = realdf['low_price']
-    realdf['quote_change'] = realdf['change_rate']
-    realdf['close'] = realdf['new_price']
-    realdf['amount'] = realdf['deal_amount']
-    realdf['turnover'] = realdf['turnoverrate']
-    realdf['volume'] = pd.to_numeric(realdf['volume'], errors='coerce').fillna(0).astype('float64')
-    realdf['amount'] = pd.to_numeric(realdf['amount'], errors='coerce').fillna(0).astype('float64')
-
-    h_col = tuple(tbs.CN_STOCK_HIST_DATA['columns'])
-    rundate = str(date.strftime("%Y-%m-%d"))
-    realdf['code'] = realdf['code'].astype(str).str.split('.').str[0].str.zfill(6)
-    realdf = realdf.drop_duplicates('code', keep='last').set_index('code', drop=False)
-
-    for key in list(stocks_data):
-        code = str(key[1]).split('.')[0].zfill(6)
-        name = key[2]
-        pr_value = stocks_data.pop(key)
-        target_day = pd.Timestamp(date).normalize()
-        history_days = pd.to_datetime(pr_value['date'], format='%Y-%m-%d', errors='coerce')
-        pr_value = pr_value.loc[history_days < target_day]
-        new_key = (rundate, code, name)
-        if code not in realdf.index:
-            continue
-        data = realdf.loc[[code], h_col].copy()
-        if 'volume_ratio' in realdf.columns:
-            data['volume_ratio'] = realdf.loc[code, 'volume_ratio']
-        pr_value = pd.concat([pr_value, data], axis=0).reset_index(drop=True)
-        if 'volume_ratio' in pr_value.columns:
-            pr_value['volume_ratio'] = pr_value['volume_ratio'].fillna(1.0)
-        pr_value.loc[:, 'p_change'] = tl.ROC(pr_value['close'].to_numpy(dtype='float64'), 1)
-        pr_value['p_change'] = pr_value['p_change'].fillna(0.0)
-        pr_value['date'] = pd.to_datetime(pr_value.date, format='%Y-%m-%d')
-        stocks_data[new_key] = pr_value
-
-    return stocks_data
-
-from instock.core.stockfetch import fetch_stocks
+# stocks_data_to_realtime 统一自 instock.core.stockfetch 导入维护（DRY）
+from instock.core.stockfetch import fetch_stocks, stocks_data_to_realtime
 import talib as tl
 import instock.lib.trade_time as trd
 import datetime
@@ -163,9 +125,9 @@ def prepareRealTime(stocks_data=None,realtime=False):
     if stocks_data is None:
         run_date, run_date_nph = trd.get_trade_date_last()
         now_time = datetime.datetime.now()
-        # 盘中开市期间（未到15:00收盘）获取最新行情快照时，必须使用当前交易日 run_date_nph，
+        # 盘中开市期间（排除午间休市 11:30-13:00 与收盘后）获取最新行情快照时，必须使用当前交易日 run_date_nph，
         # 避免在盘中用上一历史收盘日比对新浪实时行情导致 0/3900 覆盖不足报错退出
-        if trd.is_trade_date(now_time.date()) and trd.is_open(now_time) and not trd.is_close(now_time):
+        if trd.is_trading(now_time):
             target_date = run_date_nph
         else:
             target_date = run_date
@@ -181,7 +143,7 @@ def prepareRealTime(stocks_data=None,realtime=False):
     now_time = datetime.datetime.now()
     run_date = now_time.date()
             
-    if date != str(run_date)[:10] and trd.is_trade_date(run_date) and trd.is_open(now_time) and not trd.is_close(now_time):
+    if date != str(run_date)[:10] and trd.is_trading(now_time):
             
         date = run_date
         logging.info(f"strategy_enter_readldf：{date}")

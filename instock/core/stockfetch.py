@@ -1211,6 +1211,51 @@ def backfill_tdx_daily_data(data, date, return_stats=False, asset_type='stock'):
         return stats if return_stats else 0
 
 
+def stocks_data_to_realtime(date, stocks_data, realdf):
+    """将实盘/快照行情增量拼接到股票历史数据中（标准通用函数，严格保证DRY与类型安全）"""
+    stocks_data = dict(stocks_data)
+    realdf = realdf.copy()
+    realdf['open'] = realdf['open_price']
+    realdf['high'] = realdf['high_price']
+    realdf['low'] = realdf['low_price']
+    realdf['quote_change'] = realdf['change_rate']
+    realdf['lastp'] = realdf.get('pre_close_price', realdf['new_price'])
+    realdf['close'] = realdf['new_price']
+    realdf['amount'] = realdf['deal_amount']
+    realdf['turnover'] = realdf['turnoverrate']
+    realdf['volume'] = pd.to_numeric(realdf['volume'], errors='coerce').fillna(0).astype('float64')
+    realdf['amount'] = pd.to_numeric(realdf['amount'], errors='coerce').fillna(0).astype('float64')
+
+    h_col = tuple(tbs.CN_STOCK_HIST_DATA['columns'])
+    rundate = str(date.strftime("%Y-%m-%d")) if hasattr(date, "strftime") else str(date)[:10]
+    realdf['code'] = realdf['code'].astype(str).str.split('.').str[0].str.zfill(6)
+    realdf = realdf.drop_duplicates('code', keep='last').set_index('code', drop=False)
+
+    target_day = pd.Timestamp(date).normalize()
+    for key in list(stocks_data):
+        code = str(key[1]).split('.')[0].zfill(6)
+        name = key[2]
+        pr_value = stocks_data.pop(key)
+        history_days = pd.to_datetime(pr_value['date'], format='%Y-%m-%d', errors='coerce')
+        pr_value = pr_value.loc[history_days < target_day]
+        new_key = (rundate, code, name)
+        if code not in realdf.index:
+            continue
+        data = realdf.loc[[code], h_col].copy()
+        if 'volume_ratio' in realdf.columns:
+            data['volume_ratio'] = realdf.loc[code, 'volume_ratio']
+        pr_value = pd.concat([pr_value, data], axis=0).reset_index(drop=True)
+        if 'volume_ratio' in pr_value.columns:
+            pr_value['volume_ratio'] = pr_value['volume_ratio'].fillna(1.0)
+        pr_value = _normalize_talib_columns(pr_value)
+        pr_value.loc[:, 'p_change'] = tl.ROC(pr_value['close'].to_numpy(dtype='float64'), 1)
+        pr_value['p_change'] = pr_value['p_change'].fillna(0.0)
+        pr_value['date'] = pd.to_datetime(pr_value.date, format='%Y-%m-%d')
+        stocks_data[new_key] = pr_value
+
+    return stocks_data
+
+
 if __name__ == "__main__":
     date_start, is_cache = trd.get_trade_hist_interval('2025-05-29') 
     data = stock_hist_cache('688819', date_start, None, is_cache, 'qfq')

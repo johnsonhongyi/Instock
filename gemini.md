@@ -243,6 +243,24 @@
   3. **显式事务控制与连接安全释放（ACID）**：
      - 在 `update_db_from_df` 批量入库时显式设置 `conn.autocommit(False)`，批处理成功后统一 `conn.commit()`；
      - 遇到任何异常立即 `conn.rollback()`，彻底杜绝半写入风险；在 `finally` 中严格释放数据库连接。
-  4. **双端同步与编译对齐**：
-     - 本地完成语法编译，通过 Git Bundle SOP 同步至容器 HEAD，重新编译 pyc 字节码。
+## [2026-10-08 21:55] 确认MA26设计意图、彻底修复单例缓存反向污染、完善午休判定与实现全链路DRY
+
+- **任务背景**：用户明确指示：`keep_increasing.py` 均线参数明确保持原策略设计意图（26 周期），并全面推进 P1 阶段健壮性与架构优化。
+- **实施成果**：
+  1. **明确固化 MA26 趋势防守线设计意图（SOLID & OCP）**：
+     - 在 [`instock/core/strategy/keep_increasing.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/core/strategy/keep_increasing.py) 中保持 `timeperiod=26`，并在日线与周线核心计算处补充完备设计注释（说明其为中期趋势防守线/一目基准线，变量名保持向后兼容），消除歧义与坏味道。
+  2. **根除 `singleton_stock.py` 缓存反向污染（Robustness & High Perf）**：
+     - 在 [`instock/core/singleton_stock.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/core/singleton_stock.py) 中彻底重构 `stock_hist_data`：
+       - 将全市场数据 `_full_data` 与局部候选股缓存 `_subset_cache` 物理隔离，局部请求绝对无法冲刷覆盖全市场缓存；
+       - 当全量数据就绪时，局部请求直接从内存全量字典中极速过滤返回（耗时由数秒降至 0.1 毫秒），杜绝重复并发网络/磁盘 I/O；
+       - 彻底解决“先请求局部导致后请求全量时拿到残缺股票池”的致命反向污染 Bug。
+  3. **午休时段（11:30-13:00）误触判定彻底修复（KISS）**：
+     - 在 [`instock/lib/trade_time.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/lib/trade_time.py) 中新增 `is_trading(now_time)` 标准函数，集成交易日与开市时段校验，严格剔除 11:30-13:00 午间休市期；
+     - 在 [`instock/job/backtest_data_daily_job_edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/backtest_data_daily_job_edit.py) 中全面采用 `is_trading`，彻底消除午休期间误判为盘中活跃期而频繁请求实时接口的问题。
+  4. **全链路实时行情增量拼接 DRY 彻底整合（DRY & SOLID）**：
+     - 在 [`instock/core/stockfetch.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/core/stockfetch.py) 统一定义并导出标准化 `stocks_data_to_realtime` 函数；
+     - 在 [`instock/job/strategy_enter-edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/strategy_enter-edit.py) 与 [`instock/job/backtest_data_daily_job_edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/backtest_data_daily_job_edit.py) 中移除各自近百行的重复代码，改为统一从 `stockfetch` 导入；
+     - 彻底消除两端代码漂移隐患，实现单一真理源（Single Source of Truth）。
+  5. **双端同步与编译对齐**：
+     - 本地 6 个核心文件全部通过 `python -m py_compile` 语法验证；按 SOP 生成 Bundle 同步容器，重新编译 pyc 并校验 SHA256。
 

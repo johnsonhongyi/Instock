@@ -374,6 +374,7 @@ def check(code_name, data, date=None, threshold=60):
     dataW.loc[:, 'ma5'] = tl.MA(dataW['close'].values, timeperiod=5)
     dataW['ma5'].values[np.isnan(dataW['ma5'].values)] = 0.0
     
+    # 策略核心设计明确采用 26 周期（中期趋势防守线/一目基准线，变量名 ma20 保持向后兼容）
     dataW.loc[:, 'ma20'] = tl.MA(dataW['close'].values, timeperiod=26)
     dataW['ma20'].values[np.isnan(dataW['ma20'].values)] = 0.0
     pw_ma5 = dataW.iloc[-1]['ma5']
@@ -396,6 +397,7 @@ def check(code_name, data, date=None, threshold=60):
     #日K
     data.loc[:, 'ma5'] = tl.MA(data['close'].values, timeperiod=5)
     data['ma5'].values[np.isnan(data['ma5'].values)] = 0.0
+    # 策略核心设计明确采用 26 周期（中期趋势防守线/一目基准线，变量名 ma20 保持向后兼容）
     data.loc[:, 'ma20'] = tl.MA(data['close'].values, timeperiod=26)
     data['ma20'].values[np.isnan(data['ma20'].values)] = 0.0
     p_ma5 = data.iloc[-1]['ma5']

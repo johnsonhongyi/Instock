@@ -32,6 +32,7 @@ from instock.core.stockfetch import (
     fetch_stock_top_entity_data,
     _normalize_talib_columns,
     apply_dynamic_volume_ratio,
+    stocks_data_to_realtime,
 )
 
 __author__ = 'myh '
@@ -84,60 +85,8 @@ def pandas_df(conn, sql):
     # conn.close()
     return df
 
-def stocks_data_to_realtime(date,stocks_data,realdf):
-    stocks_data = dict(stocks_data)
-    realdf = realdf.copy()
-    realdf['open'] = realdf['open_price']
-    realdf['high'] = realdf['high_price']
-    realdf['low'] = realdf['low_price']
-    realdf['quote_change'] = realdf['change_rate']
-    realdf['lastp'] = realdf['pre_close_price']
-    # realdf['close'] = realdf['pre_close_price']basic_data_daily_job.py
-    realdf['close'] = realdf['new_price']
-    realdf['amount'] = realdf['deal_amount']
-    realdf['turnover'] = realdf['turnoverrate']
-    # Sina and TDX daily files both report volume in shares and amount in yuan.
-    realdf['volume'] = pd.to_numeric(realdf['volume'], errors='coerce').fillna(0).astype('float64')
-    realdf['amount'] = pd.to_numeric(realdf['amount'], errors='coerce').fillna(0).astype('float64')
-    
-    h_col = tuple(tbs.CN_STOCK_HIST_DATA['columns'])
-    # h_col.append('p_change')
-    # ('2023-05-11', '603058', '永吉股份')
-    rundate = str(date.strftime("%Y-%m-%d"))
-    realdf['code'] = realdf['code'].astype(str).str.split('.').str[0].str.zfill(6)
-    realdf = realdf.drop_duplicates('code', keep='last').set_index('code', drop=False)
-    # rundate = date
-    for key in list(stocks_data):
-        # date1 = key[0]
-        code = str(key[1]).split('.')[0].zfill(6)
-        name = key[2]
-        pr_value = stocks_data.pop(key)
-        target_day = pd.Timestamp(date).normalize()
-        history_days = pd.to_datetime(pr_value['date'], format='%Y-%m-%d', errors='coerce')
-        pr_value = pr_value.loc[history_days < target_day]
-        # scol = stocks_data[key].columns.values
-        new_key = (rundate,code,name)
-        if code not in realdf.index:
-            # A missing live quote must not silently reuse yesterday's close intraday.
-            continue
-        data = realdf.loc[[code],h_col].copy()
-        if 'volume_ratio' in realdf.columns:
-            data['volume_ratio'] = realdf.loc[code, 'volume_ratio']
-        # pr_value = pr_value.append(data).reset_index(drop=True)
-        
-        #debug realtime
-        # pr_value = pr_value[:-1]
-        #debug realtime
-        pr_value = pd.concat([pr_value, data], axis=0).reset_index(drop=True)
-        if 'volume_ratio' in pr_value.columns:
-            pr_value['volume_ratio'] = pr_value['volume_ratio'].fillna(1.0)
-        pr_value = _normalize_talib_columns(pr_value)
-        pr_value.loc[:, 'p_change'] = tl.ROC(pr_value['close'].to_numpy(dtype='float64'), 1)
-        pr_value['p_change'] = pr_value['p_change'].fillna(0.0)
-        pr_value['date'] = pd.to_datetime(pr_value.date, format='%Y-%m-%d')
-        stocks_data[new_key] = pr_value
-        
-    return stocks_data
+# stocks_data_to_realtime 统一自 instock.core.stockfetch 导入维护（DRY）
+
 
 def filter_code_to_stock_data(stocks_data,codelist):
     stocks_data2 = {}

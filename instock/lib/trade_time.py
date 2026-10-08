@@ -57,6 +57,15 @@ def is_tradetime(now_time):
         return False
 
 
+def is_trading(now_time=None):
+    """当前时刻是否处于实际交易盘中时段（排除非交易日、午间休市 11:30-13:00 及收盘）"""
+    if now_time is None:
+        now_time = datetime.datetime.now()
+    if not is_trade_date(now_time.date()):
+        return False
+    return is_tradetime(now_time)
+
+
 PAUSE_TIME = (
     (datetime.time(11, 30, 0), datetime.time(12, 59, 30)),
 )
