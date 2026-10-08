@@ -4,6 +4,8 @@
 import logging
 import os
 import datetime
+import numpy as np
+import pandas as pd
 import pymysql
 from sqlalchemy import create_engine
 from sqlalchemy.types import NVARCHAR
@@ -111,6 +113,24 @@ def insert_other_db_from_df(to_db, data, table_name, cols_type, write_index, pri
             logging.error(f"database.insert_other_db_from_df处理异常：{table_name}表{e}")
 
 
+def _sanitize_db_value(v):
+    if v is None:
+        return None
+    if pd.isna(v):
+        return None
+    if isinstance(v, (datetime.datetime, pd.Timestamp)):
+        return v.strftime('%Y-%m-%d %H:%M:%S') if v.time() != datetime.time(0, 0, 0) else v.strftime('%Y-%m-%d')
+    if isinstance(v, datetime.date):
+        return str(v)
+    if isinstance(v, (np.integer, int)):
+        return int(v)
+    if isinstance(v, (np.floating, float)):
+        return float(v)
+    if isinstance(v, (np.bool_, bool)):
+        return bool(v)
+    return str(v) if not isinstance(v, (str, int, float)) else v
+
+
 # 更新数据
 def update_db_from_df(data, table_name, where):
     if data is None or data.empty:
@@ -126,10 +146,9 @@ def update_db_from_df(data, table_name, where):
     sql = f'UPDATE `{table_name}` SET {set_clause} WHERE {where_clause}'
 
     clean_df = data[update_cols + where_cols].copy()
-    clean_df = clean_df.where(pd.notnull(clean_df), None)
 
     params_list = [
-        tuple(None if (isinstance(v, float) and np.isnan(v)) else v for v in row)
+        tuple(_sanitize_db_value(v) for v in row)
         for row in clean_df.itertuples(index=False, name=None)
     ]
 
@@ -138,9 +157,15 @@ def update_db_from_df(data, table_name, where):
         logging.error(f"database.update_db_from_df无法连接数据库：{table_name}表")
         return
     try:
+        conn.autocommit(False)
         with conn.cursor() as db:
             db.executemany(sql, params_list)
+        conn.commit()
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         logging.error(f"database.update_db_from_df批量处理异常：{table_name}表 {e}")
     finally:
         try:

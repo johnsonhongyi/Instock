@@ -231,5 +231,18 @@
      - 在 [`instock/job/strategy_enter-edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/strategy_enter-edit.py) 的 `_stream_strategy_enter` 中，在批次循环前预先构建规范化 `quotes_indexed`（以 6 位标准代码为索引）。
      - 在 `load(batch)` 中将 $O(N)$ 的全表正则过滤重构为 $O(K)$（K=batch_size）的索引切片，彻底消除 44 次批次内重复全表扫描。
   4. **双端同步与编译对齐**：
-     - 本地语法与测试通过，按 Zero-Rebuild SOP 生成 Bundle 同步容器对齐，重新编译 pyc 字节码。
+ ## [2026-10-08 20:45] database.py 致命缺失Import补齐、多类型深度清洗与事务控制加固
+
+- **任务背景**：4路代码审计核验发现：`database.py` 在参数化升级后缺失 `import numpy as np` 和 `import pandas as pd`，`update_db_from_df` 中的 `pd.notnull` 和 `np.isnan` 会直接抛出 `NameError`，导致回测或策略更新崩溃。
+- **实施成果**：
+  1. **补齐关键依赖（Critical Fix）**：
+     - 在 [`instock/lib/database.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/lib/database.py) 头部规范引入 `import numpy as np` 和 `import pandas as pd`，消除 `NameError`。
+  2. **多类型深度清洗函数 `_sanitize_db_value`（Robustness）**：
+     - 统一转换清洗：`pd.isna` 映射为 `None` (NULL)；`datetime.datetime` / `pd.Timestamp` 格式化为标准时间串；`datetime.date` 规整为标准日期串；`np.integer` / `int` 强转原生 `int`；`np.floating` / `float` 强转原生 `float`；`np.bool_` 强转原生 `bool`。
+     - 彻底消除 `pd.NaT`、`np.nan`、`np.datetime64` 等导致 PyMySQL 序列化失败或静默 SQL 报错的隐患。
+  3. **显式事务控制与连接安全释放（ACID）**：
+     - 在 `update_db_from_df` 批量入库时显式设置 `conn.autocommit(False)`，批处理成功后统一 `conn.commit()`；
+     - 遇到任何异常立即 `conn.rollback()`，彻底杜绝半写入风险；在 `finally` 中严格释放数据库连接。
+  4. **双端同步与编译对齐**：
+     - 本地完成语法编译，通过 Git Bundle SOP 同步至容器 HEAD，重新编译 pyc 字节码。
 
