@@ -113,7 +113,7 @@ def stocks_data_to_realtime(date,stocks_data,realdf):
         name = key[2]
         pr_value = stocks_data.pop(key)
         target_day = pd.Timestamp(date).normalize()
-        history_days = pd.to_datetime(pr_value['date'], errors='coerce')
+        history_days = pd.to_datetime(pr_value['date'], format='%Y-%m-%d', errors='coerce')
         pr_value = pr_value.loc[history_days < target_day]
         # scol = stocks_data[key].columns.values
         new_key = (rundate,code,name)
@@ -178,7 +178,7 @@ def build_strategy_snapshot(date):
         for key, frame in stocks_data.items():
             if frame is not None and 'volume' in frame.columns and 'date' in frame.columns:
                 code = str(key[1]).split('.')[0].zfill(6)
-                history_dates = pd.to_datetime(frame['date'], errors='coerce')
+                history_dates = pd.to_datetime(frame['date'], format='%Y-%m-%d', errors='coerce')
                 previous = frame.loc[history_dates < target_day, 'volume']
                 history_by_code[code] = pd.to_numeric(
                     previous, errors='coerce'
@@ -236,8 +236,13 @@ def _populate_intraday_rate(data, date):
             from instock.core.singleton_stock import stock_data
             s_data = stock_data(date).get_data(date)
             if s_data is not None and not s_data.empty and 'code' in s_data.columns and 'change_rate' in s_data.columns:
-                change_map = dict(zip(s_data['code'].astype(str), s_data['change_rate'].round(2)))
-                data['rate_1'] = data['code'].astype(str).map(change_map).round(2)
+                s_codes = s_data['code'].astype(str).str.split('.').str[0].str.zfill(6)
+                s_rates = pd.to_numeric(s_data['change_rate'], errors='coerce').round(2)
+                change_map = dict(zip(s_codes, s_rates))
+                d_codes = data['code'].astype(str).str.split('.').str[0].str.zfill(6)
+                mapped = d_codes.map(change_map)
+                fallback = pd.to_numeric(data['rate_1'], errors='coerce').fillna(0.0)
+                data['rate_1'] = mapped.fillna(fallback).round(2)
     except Exception as e:
         logging.warning("填充当日1日收益率异常：%s", e)
 
@@ -300,13 +305,16 @@ def run_check(strategy_fun, table_name, stocks, date, workers=2, log_summary=Tru
     def _execute_with_pool(pool):
         nonlocal future_count, error_count
         future_to_data = {}
-        for stock, frame in stocks.items():
-            stock_frame = frame.copy(deep=True)
+
+        def _worker_task(stock, frame):
+            local_frame = frame.copy(deep=True)
             if is_check_high_tight:
-                future = pool.submit(strategy_fun, stock, stock_frame, date=date,
-                                     istop=(stock[1] in stock_tops))
-            else:
-                future = pool.submit(strategy_fun, stock, stock_frame, date=date)
+                return strategy_fun(stock, local_frame, date=date,
+                                    istop=(stock[1] in stock_tops))
+            return strategy_fun(stock, local_frame, date=date)
+
+        for stock, frame in stocks.items():
+            future = pool.submit(_worker_task, stock, frame)
             future_to_data[future] = stock
         future_count += len(future_to_data)
         for future in concurrent.futures.as_completed(future_to_data):
@@ -483,7 +491,7 @@ def _stream_strategy_enter(small, stats, selected):
             for stock in batch:
                 frame = fetch_stock_hist(stock, start_date, cached)
                 if frame is not None and not frame.empty:
-                    frame['date'] = pd.to_datetime(frame['date'], errors='coerce')
+                    frame['date'] = pd.to_datetime(frame['date'], format='%Y-%m-%d', errors='coerce')
                     history_gaps[0] += int(frame['date'].max() < pd.Timestamp(previous))
                     frames[stock] = frame
             if live and frames:

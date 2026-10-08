@@ -113,37 +113,32 @@ def insert_other_db_from_df(to_db, data, table_name, cols_type, write_index, pri
 
 # 更新数据
 def update_db_from_df(data, table_name, where):
-    data = data.where(data.notnull(), None)
-    update_string = f'UPDATE `{table_name}` set '
-    where_string = ' where '
-    cols = tuple(data.columns)
+    if data is None or data.empty:
+        return
+    cols = list(data.columns)
+    update_cols = [c for c in cols if c not in where]
+    where_cols = [c for c in cols if c in where]
+    if not update_cols or not where_cols:
+        return
+
+    set_clause = ', '.join([f'`{c}` = %s' for c in update_cols])
+    where_clause = ' AND '.join([f'`{c}` = %s' for c in where_cols])
+    sql = f'UPDATE `{table_name}` SET {set_clause} WHERE {where_clause}'
+
+    clean_df = data[update_cols + where_cols].copy()
+    clean_df = clean_df.where(pd.notnull(clean_df), None)
+
+    params_list = [
+        tuple(None if (isinstance(v, float) and np.isnan(v)) else v for v in row)
+        for row in clean_df.itertuples(index=False, name=None)
+    ]
+
     with get_connection() as conn:
         with conn.cursor() as db:
             try:
-                for row in data.values:
-                    sql = update_string
-                    sql_where = where_string
-                    for index, col in enumerate(cols):
-                        val = row[index]
-                        if col in where:
-                            prefix = "" if len(sql_where) == len(where_string) else " and "
-                            if isinstance(val, (str, datetime.date, datetime.datetime)):
-                                sql_where = f'''{sql_where}{prefix}`{col}` = '{val}' '''
-                            elif val is None or (isinstance(val, float) and val != val):
-                                sql_where = f'''{sql_where}{prefix}`{col}` IS NULL '''
-                            else:
-                                sql_where = f'''{sql_where}{prefix}`{col}` = {val} '''
-                        else:
-                            if val is None or (isinstance(val, float) and val != val):
-                                sql = f'''{sql}`{col}` = NULL, '''
-                            elif isinstance(val, (str, datetime.date, datetime.datetime)):
-                                sql = f'''{sql}`{col}` = '{val}', '''
-                            else:
-                                sql = f'''{sql}`{col}` = {val}, '''
-                    sql = f'{sql[:-2]}{sql_where}'
-                    db.execute(sql)
+                db.executemany(sql, params_list)
             except Exception as e:
-                logging.error(f"database.update_db_from_df处理异常：{sql}{e}")
+                logging.error(f"database.update_db_from_df批量处理异常：{table_name}表 {e}")
 
 
 # 检查表是否存在

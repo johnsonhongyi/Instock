@@ -209,21 +209,27 @@ def get_tdx_stock_period_to_type(stock_data, period_day='W-FRI', periods=5, ncol
     if ratiodays:
         if period_day == 'W-FRI':
             # print(lastWeek1,lastweek2,lastday,lastday2)
-            duratio = int(str(datetime.datetime.strptime(lastWeek1, '%Y-%m-%d').date() - datetime.datetime.strptime(lastday, '%Y-%m-%d').date())[0])
-            ratio_d =(5-(duratio%5))/5
+            d1 = datetime.datetime.strptime(lastWeek1, '%Y-%m-%d').date()
+            d2 = datetime.datetime.strptime(lastday, '%Y-%m-%d').date()
+            duratio = abs((d1 - d2).days)
+            ratio_d = (5 - (duratio % 5)) / 5
             # print("ratio_d:%s %s"%(ratio_d,lastday))
         elif period_day.find('W') >= 0:
             # print(lastWeek1,lastweek2,lastday,lastday2)
-            duratio = int(str(datetime.datetime.strptime(lastday, '%Y-%m-%d').date() - datetime.datetime.strptime(lastweek2, '%Y-%m-%d').date())[0])
-            ratio_d =(duratio)/5
+            d1 = datetime.datetime.strptime(lastday, '%Y-%m-%d').date()
+            d2 = datetime.datetime.strptime(lastweek2, '%Y-%m-%d').date()
+            duratio = abs((d1 - d2).days)
+            ratio_d = duratio / 5
             # print("ratio_d:%s %s"%(ratio_d,lastday))
         elif period_day == 'BM':
             # daynow = '2023-04-26'
             # lastday = '2023-04-23'
             # print(lastWeek1,lastweek2,lastday,lastday2)
             # print((str(datetime.datetime.strptime(lastWeek1, '%Y-%m-%d').date() - datetime.datetime.strptime(lastday, '%Y-%m-%d').date())[:2]))
-            duratio = int(str(datetime.datetime.strptime(lastday, '%Y-%m-%d').date() - datetime.datetime.strptime(lastweek2, '%Y-%m-%d').date())[:2])
-            ratio_d =(30-(duratio%30))/30
+            d1 = datetime.datetime.strptime(lastday, '%Y-%m-%d').date()
+            d2 = datetime.datetime.strptime(lastweek2, '%Y-%m-%d').date()
+            duratio = abs((d1 - d2).days)
+            ratio_d = (30 - (duratio % 30)) / 30
             # print("ratio_d:%s %s dura:%s"%(ratio_d,lastday,duratio))
         elif period_day.find('M') >= 0:
             ratio_d = 1
@@ -293,7 +299,7 @@ def check_rsi_status(data,threshold=60,period_day=False):
         
     
 def check_macd_status(data,threshold=60,period_day=False):
-    if data is None or len(data) < 3:
+    if data is None or len(data) < 34:
         return False
     # macd
     data.loc[:, 'diff'], data.loc[:, 'dea'], data.loc[:, 'macd'] = tl.MACD(

@@ -100,7 +100,7 @@ class stock_hist_data(metaclass=singleton_type):
             self._loaded_key = cache_key
             self._loaded_date = date_key
 
-            date_start, is_cache = trd.get_trade_hist_interval(stocks[0][0])
+            date_start, is_cache = trd.get_trade_hist_interval(self._date_key(stocks[0][0]))
             _data = {}
             worker_count = max(1, min(int(workers), 2))
             batch_size = worker_count * 4
