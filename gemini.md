@@ -138,3 +138,29 @@
      - **今日（2026-10-08）热修复全记录**：包括策略开市日期 Bug、均线多头越界 Bug、策略源码全量纳管与 .gitignore 纠偏、盘中回测 14:58 日期 Bug 与 14:30 独占无锁调度优化；
      - **标准开发与生产同步操作流水线（Zero-Rebuild SOP）**：涵盖策略脚本挂载秒级热更、Job/核心脚本持锁原子替换、以及基于 Git Bundle 的内网零网络提交历史快进对齐指令。
   2. **本地独立库版本留存**：在独立版本库 `handoff/` 中完成提交：`f6a635e docs: 沉淀零打包免重建容器标准化同步工作流SOP及1008热修复全记录`。物理隔绝远端 GitHub，本地版本历史完整可追溯。
+
+## [2026-10-08 18:05] 实盘1日收益率当日涨跌幅填充与日终回测链路彻底修复
+
+- **任务背景**：用户反馈策略运行的“多日收益率回测”功能异常，提出三大关键疑问：
+  1. 为什么设计的当日实盘时候 1 日收益率未显示当日涨跌幅？
+  2. 为什么收盘后自动计算所有周期的收益率今天还没出现（是没到时间还是有Bug）？
+  3. 当前手动策略刷新和盘中自动定时执行时均未在 1 日收益率中显示当日涨跌幅。
+- **根因深度排查**：
+  1. **日终全周期收益率未出现的双重根因**：
+     - **时间窗口未到**：Crontab 中收盘回测任务设定时间为 **18:15**（`backtest_data_daily_job.py`）和 **18:25**（`backtest_data_daily_job_edit.py`），用户提问时（约 17:30）尚未到达触发时间。
+     - **日终流水线路径异常（Hidden Bug）**：排查日志发现 16:40 执行的 `execute_daily_job.py` 在 16:57 执行到收盘策略时抛出 `FileNotFoundError: /data/InStock/instock/strategy_enter-edit.py`。根因为 `strategy_data_daily_job.py` 内部 `cpath_current` 拼装漏了 `/job` 目录，导致收盘策略计算中断。
+     - **数据库更新类型引号缺失（Critical Bug）**：`instock/lib/database.py` 的 `update_db_from_df` 在拼接 SQL 时，仅对 `str` 类型加单引号；当遇到 `datetime.date` 对象时直接输出为无引号的 `date = 2026-10-08`，被 MySQL 当作数学减法 `2026 - 10 - 8 = 2008`，抛出 `(1292, "Truncated incorrect datetime value: '2008'")`，导致历史回测更新长期静默失败！
+  2. **实盘/手动扫描未显示当日涨跌幅的根因**：
+     - `strategy_enter-edit.py` 为避免实盘扫描卡顿，采用了“选股与回测解耦”设计（`INSTOCK_DEFER_BACKTEST=1`），写入数据库时回测列全部置为 `NULL`，原本期望盘中回测任务异步回填。
+     - 但手动刷新及绝大部分盘中定时扫描不会触发回测任务，导致前端界面长期展示空白。
+- **完成成果**：
+  1. **即时填充实盘当日涨跌幅（KISS）**：
+     - 在 [`instock/job/strategy_enter-edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/strategy_enter-edit.py) 提取 `_populate_intraday_rate` 函数。在选股入库时，若为当天交易日，直接从实时行情快照中提取最新 `change_rate` 映射填充至 `data['rate_1']`。
+     - 无论是 Web 手动点击刷新还是盘中定时扫描，入库瞬间 `1日收益率` 毫秒级展示当日实时涨跌幅，无需依赖后台回测。
+  2. **修复日终脚本路径与导包环境**：
+     - 在 [`instock/job/strategy_data_daily_job.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/strategy_data_daily_job.py) 修正 `strategy_enter-edit.py` 脚本定位为 `os.path.dirname(__file__)`，并补充 job 目录至 `sys.path`，彻底根除 `FileNotFoundError` 与 `ModuleNotFoundError`。
+  3. **修复 MariaDB 日期类型更新 1292 致命 Bug**：
+     - 在 [`instock/lib/database.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/lib/database.py) 的 `update_db_from_df` 中，将 `isinstance(val, (str, datetime.date, datetime.datetime))` 均严格包裹单引号，彻底杜绝 `2008` 截断错误。
+  4. **规范同步与实盘数据验证**：
+     - 依据 SOP 完成本地 Git 提交（`2413916`），通过 Bundle 将容器 HEAD 完全对齐至 `2413916`。
+     - 完成今日已选出股票的 `rate_1` 实时回填，查询 MariaDB 验证：今日 `cn_stock_strategy_enter` 等全部策略命中股票的 `rate_1` 均已 100% 成功展示为今日实际涨跌幅（如山东路桥 +4.26%、陆家嘴 +9.99%、彩蝶实业 +10.01% 等）。
