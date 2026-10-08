@@ -208,5 +208,28 @@
        - 补齐 `volume_ratio` 的 `fillna(1.0)` 和 `drop_duplicates` 容错；
        - `pd.to_datetime` 补齐显式 `format='%Y-%m-%d'` 加速。
   3. **数据库连接池释放防御（Robustness）**：
-     - 在 [`instock/lib/database.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/lib/database.py) 的 `update_db_from_df` 中增加对 `conn is None` 的边界检查，并在 `finally` 块中显式调用 `conn.close()`，彻底防止高频策略更新下的数据库连接泄露。
+ ## [2026-10-08 20:15] 快照加载性能瓶颈根除与加厚基线集中元数据零I/O优化
+
+- **任务背景**：用户反馈虽然配置了双重缓存机制且命中率达 99.7%，但策略刷新时“快照加载”阶段依然耗时 2分25秒至 6分29秒，盘前预处理+实盘增量拼接未能有效加速。深入排查底层缓存完备性并实施彻底优化。
+- **根因深度诊断**：
+  1. **元数据 Manifest 断层（Critical Bug）**：
+     - `/data/InStock/instock/cache/hist/manifest.json` 此前仅有 13 KB（仅含 19 只股票）。
+     - 根因为原 `save_manifest` 优先匹配 `*-600.meta.json`，因历史残留 19 个旧 600 文件导致 5544 个加厚基线 `*-1000.meta.json` 被全部跳过。
+     - 导致 `is_history_cache_ready()` 判定缓存未就绪，批次降级，且全市场无法享用集中式元数据。
+  2. **基线类型硬编码强制绕过内存元数据（Critical Bug）**：
+     - 在 [`instock/JSONData/prepared_history.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/JSONData/prepared_history.py) 中，`_load_metadata` 调用处硬编码了 `symbol=symbol if cand_rows == UNIFIED_BASE_ROWS else None`。
+     - 由于 `UNIFIED_BASE_ROWS=600`，对 1000 行加厚基线传入了 `symbol=None`，强制绕过内存 Manifest，直接退化为对磁盘进行 5544 次 `.meta.json` 磁盘单文件遍历读取，单次快照产生超过 3.3 万次系统调用！
+  3. **批次加载内全表重复过滤与向量化计算（High Perf）**：
+     - 在 [`instock/job/strategy_enter-edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/strategy_enter-edit.py) 的 `load(batch)` 中，44 个批次每个批次都对 5519 行的 `quotes` 执行全表 `quotes.code.astype(str).str.split('.').str[0].str.zfill(6).isin(codes)`，累计产生了上百次无谓的全表正则与字符串向量化扫描。
+- **实施成果**：
+  1. **Manifest 集中式元数据生成全兼容重构（DRY & Robustness）**：
+     - 在 [`instock/JSONData/prepared_history.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/JSONData/prepared_history.py) 中重构 `save_manifest`，统一全量聚合 `(1000, 600, UNIFIED_BASE_ROWS)` 所有规则文件，杜绝漏扫。
+     - 容器端生成并固化 5544 只个股的加厚基线元数据至 `manifest.json`（3.8 MB），`is_history_cache_ready()` 100% 判定为就绪。
+  2. **1000行加厚基线零磁盘元数据 I/O 直通（High Perf）**：
+     - 在 `prepared_history.py` 中彻底解绑 `symbol=symbol` 的基线行数限制，确保 1000 行基线 100% 直通内存 Manifest，实现元数据查询 0 磁盘 I/O。
+  3. **实时行情批次哈希索引秒级切片（High Perf & KISS）**：
+     - 在 [`instock/job/strategy_enter-edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/strategy_enter-edit.py) 的 `_stream_strategy_enter` 中，在批次循环前预先构建规范化 `quotes_indexed`（以 6 位标准代码为索引）。
+     - 在 `load(batch)` 中将 $O(N)$ 的全表正则过滤重构为 $O(K)$（K=batch_size）的索引切片，彻底消除 44 次批次内重复全表扫描。
+  4. **双端同步与编译对齐**：
+     - 本地语法与测试通过，按 Zero-Rebuild SOP 生成 Bundle 同步容器对齐，重新编译 pyc 字节码。
 

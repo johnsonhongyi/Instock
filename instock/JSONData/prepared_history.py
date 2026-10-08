@@ -36,17 +36,16 @@ def _load_manifest(parent_dir):
 
 
 def save_manifest(directory):
-    """Scan directory and aggregate all *-600.meta.json (or *-1000) into a single manifest.json."""
+    """Scan directory and aggregate all *-1000 and *-600 into a single manifest.json."""
     parent = Path(directory)
     manifest = {}
-    meta_files = list(parent.glob(f'*-{UNIFIED_BASE_ROWS}.meta.json'))
-    if not meta_files:
-        meta_files = list(parent.glob('*-1000.meta.json'))
-    for meta_file in meta_files:
-        symbol = meta_file.name.split('-')[0]
-        info = _load_metadata(meta_file)
-        if info:
-            manifest[symbol] = info
+    for rows in (1000, 600, UNIFIED_BASE_ROWS):
+        for meta_file in parent.glob(f'*-{rows}.meta.json'):
+            symbol = meta_file.name.split('-')[0]
+            if symbol not in manifest:
+                info = _load_metadata(meta_file)
+                if info:
+                    manifest[symbol] = info
 
     if not manifest:
         return None
@@ -124,7 +123,7 @@ def prepared_history(cache_path, fingerprint, loader, *, _lookback=None, _allow_
         if not cand_path.exists():
             continue
 
-        info = _load_metadata(cand_meta, symbol=symbol if cand_rows == UNIFIED_BASE_ROWS else None, parent=parent)
+        info = _load_metadata(cand_meta, symbol=symbol, parent=parent)
         if not info:
             continue
 

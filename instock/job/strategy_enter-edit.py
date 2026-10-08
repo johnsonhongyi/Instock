@@ -486,6 +486,11 @@ def _stream_strategy_enter(small, stats, selected):
                 stats.progress(date=str(date), history_gap_stocks=history_gaps[0], result_cache=True)
                 continue
 
+        # 预先标准化 quotes 代码并建立哈希索引，避免各 batch 循环内重复进行全表字符串向量化过滤
+        quotes_indexed = quotes.copy()
+        quotes_indexed['code_std'] = quotes_indexed['code'].astype(str).str.split('.').str[0].str.zfill(6)
+        quotes_indexed = quotes_indexed.drop_duplicates('code_std', keep='last').set_index('code_std', drop=False)
+
         def load(batch):
             frames = {}
             for stock in batch:
@@ -495,8 +500,9 @@ def _stream_strategy_enter(small, stats, selected):
                     history_gaps[0] += int(frame['date'].max() < pd.Timestamp(previous))
                     frames[stock] = frame
             if live and frames:
-                codes = {str(stock[1]).split('.')[0].zfill(6) for stock in frames}
-                subset = quotes.loc[quotes.code.astype(str).str.split('.').str[0].str.zfill(6).isin(codes)].copy()
+                codes_list = [str(stock[1]).split('.')[0].zfill(6) for stock in frames]
+                matched = [c for c in codes_list if c in quotes_indexed.index]
+                subset = quotes_indexed.loc[matched].copy() if matched else quotes.iloc[0:0].copy()
                 histories = {str(stock[1]).zfill(6): pd.to_numeric(frame.loc[
                     frame.date < pd.Timestamp(date), 'volume'], errors='coerce').dropna().tail(5).tolist()
                     for stock, frame in frames.items()}
@@ -508,8 +514,9 @@ def _stream_strategy_enter(small, stats, selected):
                 missing = {stock: frame for stock, frame in frames.items()
                            if pd.Timestamp(previous) <= frame['date'].max() < pd.Timestamp(date)}
                 if missing:
-                    codes = {str(stock[1]).split('.')[0].zfill(6) for stock in missing}
-                    subset = quotes.loc[quotes.code.astype(str).str.split('.').str[0].str.zfill(6).isin(codes)].copy()
+                    codes_list = [str(stock[1]).split('.')[0].zfill(6) for stock in missing]
+                    matched = [c for c in codes_list if c in quotes_indexed.index]
+                    subset = quotes_indexed.loc[matched].copy() if matched else quotes.iloc[0:0].copy()
                     for stock in missing:
                         frames.pop(stock)
                     frames.update(stocks_data_to_realtime(date, missing, subset))
