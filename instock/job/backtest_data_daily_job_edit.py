@@ -79,6 +79,7 @@ def stocks_data_to_realtime(date,stocks_data,realdf):
         #debug realtime
         pr_value = pd.concat([pr_value, data], axis=0).reset_index(drop=True)
         pr_value.loc[:, 'p_change'] = tl.ROC(pr_value['close'].values, 1)
+        pr_value.loc[:, 'p_change'] = pr_value['p_change'].fillna(0.0)
         pr_value['date'] = pd.to_datetime(pr_value.date, format='%Y-%m-%d')
         stocks_data2[(rundate,code,name)] = pr_value
         
@@ -161,7 +162,14 @@ def prepareRealTime(stocks_data=None,realtime=False):
     # logging.info(f"strategy_enter_readldf.prepare处理：{tables}")
     if stocks_data is None:
         run_date, run_date_nph = trd.get_trade_date_last()
-        stocks_data = stock_hist_data(run_date).get_data()
+        now_time = datetime.datetime.now()
+        # 盘中开市期间（未到15:00收盘）获取最新行情快照时，必须使用当前交易日 run_date_nph，
+        # 避免在盘中用上一历史收盘日比对新浪实时行情导致 0/3900 覆盖不足报错退出
+        if trd.is_trade_date(now_time.date()) and trd.is_open(now_time) and not trd.is_close(now_time):
+            target_date = run_date_nph
+        else:
+            target_date = run_date
+        stocks_data = stock_hist_data(target_date).get_data()
     else:
         realtime = True
     if stocks_data is None:
@@ -185,7 +193,8 @@ def prepareRealTime(stocks_data=None,realtime=False):
                 logging.info(f"strategy_enter_readldf.prepare处理异常：{date}")
                 realdf = fetch_stocks(date)
             stocks_data = stocks_data_to_realtime(date,stocks_data,realdf)
-            logging.info(f"realtime_enter_readldf：{list(stocks_data.keys())[0]}")
+            if stocks_data:
+                logging.info(f"realtime_enter_readldf：{list(stocks_data.keys())[0]}")
             
     # else:
     #     logging.info(f"realtime_is Not：{(date),(now_time)}")     

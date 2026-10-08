@@ -97,5 +97,23 @@
 - **完成动作**：
   1. **规则修正**：更新本地与容器内的 [`.gitignore`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/.gitignore)，彻底移除 `/instock/core/strategy/` 忽略项，确保纯 Python 策略源代码 100% 纳入 Git 版本控制。
   2. **代码拉取**：从权威宿主机挂载目录（`/mnt/4TB/dockerf/stock/instrategy`）全量拉取全部 27 个最新策略源码文件（含 `__init__.py`、`enter.py`、`breakthrough_platform.py`、`keep_increasing.py` 等及相关规则代码）至本地 [`instock/core/strategy/`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/core/strategy/)。
-  3. **哈希校验**：本地所有 27 个策略文件与宿主机挂载目录、Docker 容器内挂载目录 SHA256 逐一比对，100% 精确一致。
   4. **版本库状态**：VS Code“源代码管理”已能完整识别并追踪所有策略文件的改动与新增，实现“本地版本库永远是最新的单一真理源（Single Source of Truth）”。
+
+## [2026-10-08 15:45] 盘中回测任务日期Bug修复与定时执行时间无冲突优化
+
+- **任务背景**：用户反馈 14:58 定时任务中出现 `Sina行情覆盖不足: 0/3900` 与 `singleton.stock_hist_data没有2026-09-30的股票行情列表` 报错；并要求将执行很慢的 14:58 回测任务调整至 14:30，同时重排其他冲突任务以避免锁冲突。
+- **排查根因**：
+  1. 报错定位在 [`instock/job/backtest_data_daily_job_edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/backtest_data_daily_job_edit.py)，其在盘中（14:58）错误取了 `trd.get_trade_date_last()` 第 0 项历史收盘日（2026-09-30），导致向新浪比对今日行情时覆盖不足 0/3900。
+  2. 若单纯将回测任务移至 14:30，将与原配置在 14:30 执行的 `strategy_enter-edit.py` 发生硬冲突，争抢 `strategy_enter.lock` 导致退出码 75。
+- **完成成果**：
+  1. **代码修复**：
+     - 在 [`instock/job/backtest_data_daily_job_edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/backtest_data_daily_job_edit.py) 的 `prepareRealTime()` 中增加盘中交易日自动切换，盘中（`trd.is_open(now) and not trd.is_close(now)`）取 `run_date_nph`，彻底根除 0/3900 覆盖不足报错。
+     - 为 `stocks_data_to_realtime` 中的 `ROC` 价格变化率补充 `fillna(0.0)` 保护。
+     - 持共享锁完成原子备份（留存至容器内 `/tmp/inStock-git-sync-20261008-v4/backup/backtest_data_daily_job_edit.py.bak`），容器内重新编译 pyc，双端 SHA256 精确一致为 `66029597b1269b44e51a3f06d53d26618f3045ea439c6565be72a1154946aa68`。
+  2. **Crontab 调度无冲突精细重排**：
+     - 14:30 专属用于盘中回测任务：`30 14 * * 1-5 ... backtest_data_daily_job_edit.py`。
+     - 14点策略扫描重排为：`0,20,50 14 * * 1-5 ... strategy_enter-edit.py`。
+       - 14:00、14:20 扫描策略（14:20 结束正好为 14:30 回测输送最新选股标的）；
+       - 14:30 回测独占启动，充裕运行，彻底消除 `flock -n -E 75` 锁争抢；
+       - 14:50 补跑尾盘策略扫描，捕捉收盘前异动。
+     - 新配置保存于本地版本库 [`instock/config/crontab.root`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/config/crontab.root)，并已同步至容器生效且重载 cron 服务。
