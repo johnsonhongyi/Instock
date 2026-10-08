@@ -262,5 +262,20 @@
      - 在 [`instock/job/strategy_enter-edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/strategy_enter-edit.py) 与 [`instock/job/backtest_data_daily_job_edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/backtest_data_daily_job_edit.py) 中移除各自近百行的重复代码，改为统一从 `stockfetch` 导入；
      - 彻底消除两端代码漂移隐患，实现单一真理源（Single Source of Truth）。
   5. **双端同步与编译对齐**：
-     - 本地 6 个核心文件全部通过 `python -m py_compile` 语法验证；按 SOP 生成 Bundle 同步容器，重新编译 pyc 并校验 SHA256。
+## [2026-10-08 22:15] 收盘全量数据流水线黄金时段提前重排（16:00后尽早跑完）
+
+- **任务背景**：用户反馈原定时调度中收盘全量数据计算安排得太晚（尤其是日终回测硬拖至 18:25），要求在收盘 16:00 后尽早开始并完成全量计算。
+- **排查与流水线耗时分析**：
+  1. A 股 15:00 收盘清算完毕，16:00 后各外部数据源日线完全定稿。
+  2. 原调度：16:05 / 16:35 跑 `basic_data_daily_job`；16:40 才启动 `execute_daily_job`；而全量多周期收益率回测 `backtest_data_daily_job_edit` 更是拖到 18:25，导致 17:00-18:00 用户访问时回测数据长期缺失。
+- **实施成果**：
+  1. **收盘黄金时段紧凑重排（无锁冲突、按序独占）**：
+     - **16:02**：`basic_data_daily_job.py`（收盘后第一时间将 `cn_stock_spot` 基础行情定稿入库，耗时约 30 秒）；
+     - **16:08**：`execute_daily_job.py`（日终主流水线：全量技术指标 + K线形态 + 全策略扫描，耗时约 15~17 分钟，预计 16:25 全部出炉）；
+     - **16:35**：`backtest_data_daily_job_edit.py`（由原 18:25 大幅提前近 2 个小时至 16:35 独占启动，耗时约 20 分钟，预计 16:55 全量收益率计算完成）。
+  2. **17:00 前全量闭环交付**：
+     - 在 17:00 前，全市场基础行情、指标、形态、策略命中结果以及 1~100 日收益率回测全部计算完毕入库。
+  3. **双端同步与 Crontab 重载生效**：
+     - 本地更新 [`instock/config/crontab.root`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/config/crontab.root) 与 [`instock/job/execute_daily_job.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/execute_daily_job.py)；
+     - 同步至容器生效并重新载入 cron 服务。
 

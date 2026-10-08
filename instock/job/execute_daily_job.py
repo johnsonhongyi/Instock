@@ -81,8 +81,8 @@ def main():
         _run_stage('kline-patterns', kdj.main)
         _run_stage('strategies', sdj.main)
 
-        # Backtests have their own 18:15 cron entry; do not compute them twice.
-        logging.info('daily pipeline backtest deferred to its dedicated 18:15 job')
+        # Backtests have their own dedicated 16:35 cron entry; do not compute them twice.
+        logging.info('daily pipeline backtest deferred to its dedicated 16:35 job')
     except Exception:
         logging.exception('daily pipeline failed: date=%s', run_date)
     finally:
