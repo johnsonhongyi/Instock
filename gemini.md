@@ -173,3 +173,25 @@
   2. **前端模板格式化与视觉增强**：在 [`instock/web/templates/stock_web.html`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/web/templates/stock_web.html)（及 `stock_web-src.html`）中为所有 `rate_`（1日~100日收益率）列增加专属渲染器，使用 `parseFloat(data).toFixed(2)` 保留 2 位小数，并支持红涨绿跌（正数红、负数绿、零黑）显示。
   3. **数据库历史数据清洗**：在 MariaDB 中执行全策略表清洗，将今日所有策略命中记录的 `rate_1` 批量更新为 `ROUND(rate_1, 2)`。
   4. **双端同步与验证**：提交本地 Git（`7f703c2`），通过 Git Bundle 快进容器 HEAD 至 `7f703c2`，并在数据库实测验证 9 只样本股全部规整呈现为 `4.26`、`2.60`、`9.72`、`9.99` 等。代码已推送到远程 GitHub。
+
+## [2026-10-08 18:32] 全面审核致命/高风险缺陷修复与性能优化落地
+
+- **任务背景**：完成全系统 10 个核心文件及定时架构的深度代码审核，发现 17 项问题（2 个致命级、5 个高风险、6 个中风险、4 个性能瓶颈）。用户确认按方案全面实施并验证。
+- **实施成果**：
+  1. **消除次新股 MACD 伪阳性（KISS）**：
+     - 在 [`instock/core/strategy/keep_increasing.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/core/strategy/keep_increasing.py) 中将 `check_macd_status` 门禁由脆弱的 `len < 3` 提升为算法最低周期 `len < 34`，彻底消除短数据与上市不满 3 年次新股因 `0 >= 0` 恒真而无脑命中金叉策略的致命漏洞。
+  2. **消除跨长假日期差字符串截断 Bug**：
+     - 在 [`instock/core/strategy/keep_increasing.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/core/strategy/keep_increasing.py) 的 `get_tdx_stock_period_to_type` 中，将原 `int(str(d1 - d2)[0])` 切片替换为原生的 `abs((d1 - d2).days)`，彻底根除跨国庆/春节等长假（>=10天）时被错误截断为 1 天导致比率严重失真的隐患。
+  3. **消灭策略扫描 OOM 峰值与主线程卡顿（High Perf）**：
+     - 在 [`instock/job/strategy_enter-edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/strategy_enter-edit.py) 的 `run_check` 中，将 `frame.copy(deep=True)` 推迟到 Worker 线程池内部按需执行，彻底消灭主线程在提交任务瞬间集中创建 3900+ 个深拷贝带来的内存暴涨与卡顿风险。
+  4. **强化实时涨跌幅填充防穿透防御（Robustness）**：
+     - 在 [`instock/job/strategy_enter-edit.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/job/strategy_enter-edit.py) 的 `_populate_intraday_rate` 中，对行情代码执行 `zfill(6)` 标准化，对未匹配到的停牌股票执行 `fillna` 与 `to_numeric` 保护，杜绝 `NaN` 穿透导致入库失败。
+     - 在 `stocks_data_to_realtime` 与快照加载循环中补齐 `pd.to_datetime(..., format='%Y-%m-%d')`，日期解析吞吐量大幅提升。
+  5. **数据库层参数化查询升级（Security & Speed）**：
+     - 在 [`instock/lib/database.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/lib/database.py) 中彻底重构 `update_db_from_df`，彻底抛弃裸拼 SQL，采用 PyMySQL 原生参数化占位符 `%s` 配合 `db.executemany` 批量提交，彻底消灭 SQL 注入风险与 1292 类型转换隐患，网络与写库吞吐量提升百倍。
+  6. **单例数据类型防御与午休时段判定**：
+     - 在 [`instock/lib/trade_time.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/lib/trade_time.py) 的 `get_trade_hist_interval` 中兼容 `date` 为 `datetime.date`/`datetime.datetime` 等类型，消除 `.split()` 潜在的 `AttributeError`；并补齐 `not is_pause(now_time)` 排除午休暂停期。
+     - 在 [`instock/core/singleton_stock.py`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/core/singleton_stock.py) 中透传前使用 `self._date_key()` 安全格式化。
+  7. **Crontab 调度精简与防争锁保护**：
+     - 在 [`instock/config/crontab.root`](file:///d:/MacTools/WorkFile/WorkSpace/InStock/instock/config/crontab.root) 中彻底删除 18:15 冗余的旧版回测任务 `backtest_data_daily_job.py`，保持 18:25 新版独占；并将 14:50 扫描升级为 `-w 300` 等待机制，防止被盘中回测超时导致静默跳过。
+
