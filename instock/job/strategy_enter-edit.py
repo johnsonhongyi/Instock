@@ -69,6 +69,7 @@ def prepare(date, strategy):
         data.columns = columns
         _columns_backtest = tuple(tbs.TABLE_CN_STOCK_BACKTEST_DATA['columns'])
         data = pd.concat([data, pd.DataFrame(columns=_columns_backtest)])
+        _populate_intraday_rate(data, date)
         # 单例，时间段循环必须改时间
         date_str = date.strftime("%Y-%m-%d")
         if date.strftime("%Y-%m-%d") != data.iloc[0]['date']:
@@ -224,6 +225,23 @@ def prepareRealtime(date, strategy, stocks_data=None):
         logging.exception(f"Strategy_enter-edit-_daily_job.prepareRealtime处理异常：{e}")
         raise
         
+def _populate_intraday_rate(data, date):
+    """实盘/当天选股时，将实时行情的当日涨跌幅直接填充至 1日收益率(rate_1)"""
+    try:
+        now_date = datetime.date.today()
+        is_today = ((hasattr(date, 'date') and date.date() == now_date)
+                    or (hasattr(date, 'strftime') and date.strftime('%Y-%m-%d') == str(now_date))
+                    or str(date)[:10] == str(now_date))
+        if is_today and data is not None and not data.empty and 'code' in data.columns and 'rate_1' in data.columns:
+            from instock.core.singleton_stock import stock_data
+            s_data = stock_data(date).get_data(date)
+            if s_data is not None and not s_data.empty and 'code' in s_data.columns and 'change_rate' in s_data.columns:
+                change_map = dict(zip(s_data['code'].astype(str), s_data['change_rate']))
+                data['rate_1'] = data['code'].astype(str).map(change_map)
+    except Exception as e:
+        logging.warning("填充当日1日收益率异常：%s", e)
+
+
 def _publish_results(date, strategy, results):
     table_name = strategy['name']
     # 删除老数据。
@@ -243,6 +261,7 @@ def _publish_results(date, strategy, results):
     data.columns = columns
     _columns_backtest = tuple(tbs.TABLE_CN_STOCK_BACKTEST_DATA['columns'])
     data = pd.concat([data, pd.DataFrame(columns=_columns_backtest)])
+    _populate_intraday_rate(data, date)
     # 单例，时间段循环必须改时间
     date_str = date.strftime("%Y-%m-%d")
     if date.strftime("%Y-%m-%d") != data.iloc[0]['date']:

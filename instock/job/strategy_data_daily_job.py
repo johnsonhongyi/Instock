@@ -142,7 +142,8 @@ def _streaming_daily():
     previous = os.environ.get(key)
     os.environ[key] = 'daily'
     try:
-        entry = runpy.run_path(os.path.join(cpath_current, 'strategy_enter-edit.py'), run_name='daily_stream')
+        script_file = os.path.join(os.path.dirname(__file__), 'strategy_enter-edit.py')
+        entry = runpy.run_path(script_file, run_name='daily_stream')
         entry['strategy_enter'](small_strategies_only=False)
     finally:
         if previous is None:
