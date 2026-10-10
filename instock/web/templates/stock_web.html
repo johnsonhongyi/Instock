@@ -3,6 +3,11 @@
 <link rel="stylesheet" href="/static/css/bootstrap-datepicker3.min.css" />
 <link rel="stylesheet" href="/static/css/jquery.dataTables.min.css" />
 <link rel="stylesheet" href="/static/css/buttons.dataTables.min.css" />
+<style>
+    .datepicker table tr td.has-stock-data,
+    .datepicker table tr td.has-stock-data:hover { color: #d9534f; font-weight: bold; }
+    .datepicker table tr td.has-stock-data.active { color: #fff; box-shadow: inset 0 -3px #d9534f; }
+</style>
 <script src="/static/js/jquery.dataTables.min.js"></script>
 <script src="/static/js/dataTables.buttons.min.js"></script>
 <script src="/static/js/buttons.html5.min.js"></script>
@@ -45,22 +50,100 @@
 <!-- inline scripts related to this page -->
 <script type="text/javascript">
 	jQuery(function($) {
+        const nameParam = $.getUrlVar('table_name');
+        const isStrategy = "{{ web_module_data.type }}" === '股票策略数据';
+        const dateStorageKey = 'instock.strategyDate';
+        const now = new Date();
+        const today = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'),
+            String(now.getDate()).padStart(2, '0')].join('-');
+        let dateParam = "{{ date_now }}";
+        let calendarDates = new Set();
+        let calendarMonth = '';
+        const calendarRequests = {};
+        function dateKey(date) {
+            return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'),
+                String(date.getDate()).padStart(2, '0')].join('-');
+        }
+        function loadCalendar(date) {
+            if (!isStrategy) return;
+            const month = dateKey(date).slice(0, 7);
+            calendarMonth = month;
+            const key = 'instock.calendar.' + nameParam + '.' + month;
+            try {
+                const saved = JSON.parse(sessionStorage.getItem(key) || 'null');
+                if (saved && Date.now() - saved.at < 60000) {
+                    calendarDates = new Set(saved.dates);
+                    $('.date-picker').data('datepicker').fill();
+                    return;
+                }
+            } catch (error) { /* Browser storage is optional. */ }
+            if (calendarRequests[month]) return;
+            calendarDates = new Set();
+            calendarRequests[month] = $.getJSON('/instock/api_dates', {name: nameParam, month: month})
+                .done(function(result) {
+                    try {
+                        sessionStorage.setItem(key, JSON.stringify({at: Date.now(), dates: result.dates}));
+                    } catch (error) { /* Browser storage is optional. */ }
+                    if (calendarMonth === month) {
+                        calendarDates = new Set(result.dates);
+                        $('.date-picker').data('datepicker').fill();
+                    }
+                }).always(function() { delete calendarRequests[month]; });
+        }
+        if (isStrategy) {
+            try {
+                const navigation = performance.getEntriesByType('navigation')[0];
+                const saved = JSON.parse(sessionStorage.getItem(dateStorageKey) || 'null');
+                if (navigation && navigation.type === 'reload') {
+                    sessionStorage.removeItem(dateStorageKey);
+                } else if (saved && saved.day === today && /^\d{4}-\d{2}-\d{2}$/.test(saved.date)) {
+                    dateParam = saved.date;
+                } else {
+                    sessionStorage.removeItem(dateStorageKey);
+                }
+            } catch (error) {
+                // Storage may be unavailable; retain the server's default date.
+            }
+            $('.date-picker').val(dateParam);
+        }
 		$( ".date-picker" ).datepicker({
 			language: 'zh-CN', //设置语言
             format:"yyyy-mm-dd",
             showOtherMonths: true,
             selectOtherMonths: false,
             autoclose: true,
+            beforeShowDay: function(date) {
+                return calendarDates.has(dateKey(date)) ? {classes: 'has-stock-data', tooltip: '该策略当日有数据'} : {};
+            },
 			todayHighlight: true,
 			onSelect: function(selected,evnt) {
 				 console.log(selected);
 			}
         }).on('changeDate', function(ev){
+            if (isStrategy) {
+                try {
+                    const selected = $(this).val();
+                    if (selected) {
+                        const changedAt = new Date();
+                        const day = [changedAt.getFullYear(), String(changedAt.getMonth() + 1).padStart(2, '0'),
+                            String(changedAt.getDate()).padStart(2, '0')].join('-');
+                        sessionStorage.setItem(dateStorageKey, JSON.stringify({day: day, date: selected}));
+                    } else {
+                        sessionStorage.removeItem(dateStorageKey);
+                    }
+                } catch (error) {
+                    // Date filtering still works without browser storage.
+                }
+            }
 			$('input.column_filter').keyup();//触发搜索
 		});
+        $('.date-picker').on('show', function() {
+            const view = $(this).data('datepicker').viewDate;
+            loadCalendar(new Date(view.getUTCFullYear(), view.getUTCMonth(), 1));
+        }).on('changeMonth changeYear', function(event) {
+            loadCalendar(event.date);
+        });
 
-        const nameParam = $.getUrlVar('table_name');
-        const dateParam = "{{ date_now }}";
         const myTable = $('#dynamic-table').DataTable({
             "select": true,
             "sDom": "tr<'row'<'col-sm-2'l><'col-sm-4'i><'col-sm-6'p>>",
@@ -78,7 +161,13 @@
             "language": {
                 "url": "/static/js/datatables.Chinese.json"
             },
-            "ajax": "/instock/api_data?name=" + nameParam + "&date=" + dateParam,
+            "ajax": {
+                "url": "/instock/api_data",
+                "data": function (data) {
+                    data.name = nameParam;
+                    data.date = $('.date-picker').val() || dateParam;
+                }
+            },
             "columns": [
                 {% for column in web_module_data.columns %}
                 {% if column == 'code' %}

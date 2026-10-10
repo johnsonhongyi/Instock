@@ -39,7 +39,6 @@ def save_nph_stock_top_data(date, before=True):
         mdb.insert_db_from_df(data, table_name, cols_type, False, "`date`,`code`")
     except Exception as e:
         logging.error(f"basic_data_other_daily_job.save_stock_top_data处理异常：{e}")
-    stock_spot_buy(date)
 
 
 # 每日股票大宗交易
@@ -149,28 +148,40 @@ def stock_spot_buy(date):
         if not mdb.checkTableIsExist(_table_name):
             return
 
+        from sqlalchemy import text
+        with mdb.engine().connect() as connection:
+            available = connection.execute(text(
+                f'SELECT COUNT(*) FROM `{_table_name}` WHERE `date` = :date '
+                'AND pe9 IS NOT NULL AND pe9 <> 0 AND pbnewmrq IS NOT NULL '
+                'AND pbnewmrq <> 0 AND roe_weight IS NOT NULL'), {'date': date}).scalar()
+        if int(available or 0) < 3000:
+            from instock.core.fundamental_daily import enrich_spot_fundamentals
+            if not enrich_spot_fundamentals(date):
+                logging.error('basic stock selection skipped: financial snapshot unavailable for %s', date)
+                return
+
         sql = f'''SELECT * FROM `{_table_name}` WHERE `date` = '{date}' and 
                 `pe9` > 0 and `pe9` <= 20 and `pbnewmrq` <= 10 and `roe_weight` >= 15'''
         data = pd.read_sql(sql=sql, con=mdb.engine())
         data = data.drop_duplicates(subset="code", keep="last")
-        if len(data.index) == 0:
-            return
-
         table_name = tbs.TABLE_CN_STOCK_SPOT_BUY['name']
         # 删除老数据。
         if mdb.checkTableIsExist(table_name):
-            del_sql = f"DELETE FROM `{table_name}` where `date` = '{date}'"
-            mdb.executeSql(del_sql)
-            cols_type = None
+            with mdb.engine().begin() as connection:
+                connection.execute(text(f'DELETE FROM `{table_name}` WHERE `date` = :date'), {'date': date})
+                if not data.empty:
+                    data.to_sql(table_name, con=connection, if_exists='append', index=False)
         else:
             cols_type = tbs.get_field_types(tbs.TABLE_CN_STOCK_SPOT_BUY['columns'])
-
-        mdb.insert_db_from_df(data, table_name, cols_type, False, "`date`,`code`")
+            if not data.empty:
+                mdb.insert_db_from_df(data, table_name, cols_type, False, "`date`,`code`")
+        logging.info('basic stock selection complete: date=%s matched=%s', date, len(data))
     except Exception as e:
         logging.error(f"basic_data_other_daily_job.stock_spot_buy处理异常：{e}")
 
 
 def main():
+    runt.run_with_args(stock_spot_buy)
     runt.run_with_args(save_nph_stock_top_data)
     runt.run_with_args(save_stock_blocktrade_data)
     runt.run_with_args(save_nph_stock_bonus)

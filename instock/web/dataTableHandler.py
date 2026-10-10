@@ -6,6 +6,9 @@ from abc import ABC
 from tornado import gen
 # import logging
 import datetime
+import time
+import logging
+from collections import OrderedDict
 import instock.lib.version as version
 import instock.lib.trade_time as trd
 import instock.core.singleton_stock_web_module_data as sswmd
@@ -21,6 +24,55 @@ class MyEncoder(json.JSONEncoder):
             return obj.strftime("%Y-%m-%d")
         else:
             return json.JSONEncoder.default(self, obj)
+
+
+class GetStockDatesHandler(webBase.BaseHandler):
+    """Bounded, short-lived cache of indexed date-only month queries."""
+    cache = OrderedDict()
+    ttl = 60
+
+    def get(self):
+        name = self.get_argument('name', '')
+        month = self.get_argument('month', '')
+        modules = sswmd.stock_web_module_data().get_data_list()
+        module = next((item for item in modules if item.table_name == name
+                       and item.type == '股票策略数据' and 'date' in item.columns), None)
+        try:
+            first = datetime.datetime.strptime(month, '%Y-%m').date().replace(day=1)
+            if first.strftime('%Y-%m') != month:
+                raise ValueError('Invalid month')
+            following = (first.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+            start = first - datetime.timedelta(days=7)
+            end = following + datetime.timedelta(days=7)
+        except (ValueError, OverflowError):
+            self.set_status(400)
+            self.write({'dates': [], 'error': 'Invalid month'})
+            return
+        if module is None:
+            self.set_status(400)
+            self.write({'dates': [], 'error': 'Invalid strategy'})
+            return
+        key = (name, month)
+        cached = self.cache.get(key)
+        if cached and time.monotonic() - cached[0] < self.ttl:
+            self.cache.move_to_end(key)
+            self.write({'dates': cached[1], 'ttl': self.ttl})
+            return
+        try:
+            rows = self.db.query(
+                f'SELECT DISTINCT `date` FROM `{module.table_name}` '
+                'WHERE `date` >= %s AND `date` < %s ORDER BY `date`', start, end)
+            dates = [row['date'].strftime('%Y-%m-%d') for row in rows]
+        except Exception:
+            logging.exception('Strategy calendar query failed: %s', name)
+            self.set_status(503)
+            self.write({'dates': [], 'error': 'Calendar temporarily unavailable'})
+            return
+        self.cache[key] = (time.monotonic(), dates)
+        self.cache.move_to_end(key)
+        while len(self.cache) > 256:
+            self.cache.popitem(last=False)
+        self.write({'dates': dates, 'ttl': self.ttl})
 
 
 # 获得页面数据。

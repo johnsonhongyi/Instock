@@ -753,6 +753,8 @@ def fetch_stocks(date):
                 data[column] = ''
             elif column in ('report_date', 'listing_date'):
                 data[column] = None
+            elif column in ('pe9', 'pbnewmrq', 'roe_weight'):
+                data[column] = None
             else:
                 data[column] = 0
         return data[columns]
