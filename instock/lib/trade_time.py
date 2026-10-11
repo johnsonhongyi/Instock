@@ -8,38 +8,70 @@ __author__ = 'myh '
 __date__ = '2023/4/10 '
 
 
+def _as_date(value):
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+    value = str(value or '').strip()[:10]
+    if len(value) == 8 and value.isdigit():
+        value = '%s-%s-%s' % (value[:4], value[4:6], value[6:8])
+    try:
+        return datetime.date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _get_trade_dates():
+    values = stock_trade_date().get_data()
+    if values is None:
+        return None
+    if isinstance(values, (str, datetime.date, datetime.datetime)):
+        values = (values,)
+    normalized = set()
+    for value in values:
+        parsed = _as_date(value)
+        if parsed is not None:
+            normalized.add(parsed)
+    return normalized
+
+
+def _restore_date_type(value, original):
+    if isinstance(original, datetime.datetime):
+        return datetime.datetime.combine(value, original.timetz())
+    return value
+
+
 def is_trade_date(date=None):
-    trade_date = stock_trade_date().get_data()
-    if trade_date is None:
-        return False
-    if date in trade_date:
-        return True
-    else:
-        return False
+    target = _as_date(date)
+    trade_dates = _get_trade_dates()
+    return target is not None and trade_dates is not None and target in trade_dates
 
 
 def get_previous_trade_date(date):
-    trade_date = stock_trade_date().get_data()
-    if trade_date is None:
+    target = _as_date(date)
+    if target is None:
+        raise ValueError('date must be a valid calendar date')
+    trade_dates = _get_trade_dates()
+    if trade_dates is None:
         return date
-    tmp_date = date
-    while True:
-        tmp_date += datetime.timedelta(days=-1)
-        if tmp_date in trade_date:
-            break
-    return tmp_date
+    previous = [candidate for candidate in trade_dates if candidate < target]
+    if not previous:
+        raise LookupError('no previous trade date in the available calendar')
+    return _restore_date_type(max(previous), date)
 
 
 def get_next_trade_date(date):
-    trade_date = stock_trade_date().get_data()
-    if trade_date is None:
+    target = _as_date(date)
+    if target is None:
+        raise ValueError('date must be a valid calendar date')
+    trade_dates = _get_trade_dates()
+    if trade_dates is None:
         return date
-    tmp_date = date
-    while True:
-        tmp_date += datetime.timedelta(days=1)
-        if tmp_date in trade_date:
-            break
-    return tmp_date
+    following = [candidate for candidate in trade_dates if candidate > target]
+    if not following:
+        raise LookupError('no next trade date in the available calendar')
+    return _restore_date_type(min(following), date)
 
 
 OPEN_TIME = (
