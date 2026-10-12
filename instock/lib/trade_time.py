@@ -2,7 +2,23 @@
 # -*- coding: utf-8 -*-
 
 import datetime
-from instock.core.singleton_trade_date import stock_trade_date
+import logging
+import os
+import sys
+
+
+_CALENDAR_PYTHONPATH = os.environ.get(
+    'INSTOCK_TRADE_CALENDAR_PYTHONPATH',
+    '/data/InStock/instock/cache/trade_calendar_pythonpath',
+)
+if _CALENDAR_PYTHONPATH and _CALENDAR_PYTHONPATH not in sys.path:
+    sys.path.insert(0, _CALENDAR_PYTHONPATH)
+
+try:
+    import a_trade_calendar as _a_trade_calendar
+except Exception as e:
+    _a_trade_calendar = None
+    logging.error('a_trade_calendar is unavailable; trade-date checks fail closed: %s', e)
 
 __author__ = 'myh '
 __date__ = '2023/4/10 '
@@ -22,20 +38,6 @@ def _as_date(value):
         return None
 
 
-def _get_trade_dates():
-    values = stock_trade_date().get_data()
-    if values is None:
-        return None
-    if isinstance(values, (str, datetime.date, datetime.datetime)):
-        values = (values,)
-    normalized = set()
-    for value in values:
-        parsed = _as_date(value)
-        if parsed is not None:
-            normalized.add(parsed)
-    return normalized
-
-
 def _restore_date_type(value, original):
     if isinstance(original, datetime.datetime):
         return datetime.datetime.combine(value, original.timetz())
@@ -44,34 +46,37 @@ def _restore_date_type(value, original):
 
 def is_trade_date(date=None):
     target = _as_date(date)
-    trade_dates = _get_trade_dates()
-    return target is not None and trade_dates is not None and target in trade_dates
+    if target is None or _a_trade_calendar is None:
+        return False
+    try:
+        return bool(_a_trade_calendar.is_trade_date(target.isoformat()))
+    except Exception as e:
+        logging.error('a_trade_calendar trade-date check failed for %s: %s', target, e)
+        return False
 
 
 def get_previous_trade_date(date):
     target = _as_date(date)
     if target is None:
         raise ValueError('date must be a valid calendar date')
-    trade_dates = _get_trade_dates()
-    if trade_dates is None:
+    if _a_trade_calendar is None:
         return date
-    previous = [candidate for candidate in trade_dates if candidate < target]
-    if not previous:
+    previous = _as_date(_a_trade_calendar.get_pre_trade_date(target.isoformat()))
+    if previous is None:
         raise LookupError('no previous trade date in the available calendar')
-    return _restore_date_type(max(previous), date)
+    return _restore_date_type(previous, date)
 
 
 def get_next_trade_date(date):
     target = _as_date(date)
     if target is None:
         raise ValueError('date must be a valid calendar date')
-    trade_dates = _get_trade_dates()
-    if trade_dates is None:
+    if _a_trade_calendar is None:
         return date
-    following = [candidate for candidate in trade_dates if candidate > target]
-    if not following:
+    following = _as_date(_a_trade_calendar.get_next_trade_date(target.isoformat()))
+    if following is None:
         raise LookupError('no next trade date in the available calendar')
-    return _restore_date_type(min(following), date)
+    return _restore_date_type(following, date)
 
 
 OPEN_TIME = (
