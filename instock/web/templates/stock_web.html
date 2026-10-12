@@ -94,7 +94,7 @@
             try {
                 const navigation = performance.getEntriesByType('navigation')[0];
                 const saved = JSON.parse(sessionStorage.getItem(dateStorageKey) || 'null');
-                if (navigation && navigation.type === 'reload') {
+                if (navigation && navigation.type === 'reload' && !window.__instockPartialNavigation) {
                     sessionStorage.removeItem(dateStorageKey);
                 } else if (saved && saved.day === today && /^\d{4}-\d{2}-\d{2}$/.test(saved.date)) {
                     dateParam = saved.date;
