@@ -4,6 +4,9 @@
 import logging
 import os.path
 import sys
+import datetime
+import glob
+import json
 import pandas as pd
 
 cpath_current = os.path.dirname(os.path.dirname(__file__))
@@ -180,12 +183,47 @@ def stock_spot_buy(date):
         logging.error(f"basic_data_other_daily_job.stock_spot_buy处理异常：{e}")
 
 
+def _retry_recent_external_data():
+    cache_dir = os.path.join(cpath_current, 'cache', 'eastmoney')
+    today = datetime.date.today()
+    oldest = today - datetime.timedelta(days=10)
+    fetchers = {
+        'stock-blocktrade': save_stock_blocktrade_data,
+        'stock-bonus': lambda date: save_nph_stock_bonus(date, before=False),
+        'stock-fund-flow': lambda date: save_nph_stock_fundflow_data(date, before=False),
+    }
+    pending = {}
+    for dataset in fetchers:
+        prefix = dataset + '-'
+        for marker_path in glob.glob(os.path.join(cache_dir, prefix + '*.state')):
+            date_text = os.path.basename(marker_path)[len(prefix):-len('.state')]
+            try:
+                marker_date = datetime.date.fromisoformat(date_text)
+                with open(marker_path, 'r', encoding='utf-8') as stream:
+                    status = json.load(stream).get('status')
+            except (OSError, ValueError, TypeError):
+                continue
+            if oldest <= marker_date < today and status in {'blocked', 'deferred'}:
+                pending.setdefault(marker_date, set()).add(dataset)
+
+    if not pending:
+        return
+    # Recover the newest missed session first; existing fetch and persistence paths own the work.
+    retry_date = max(pending)
+    for dataset, fetcher in fetchers.items():
+        if dataset in pending[retry_date]:
+            logging.info('retrying deferred external data: dataset=%s date=%s', dataset, retry_date)
+            fetcher(retry_date)
+
+
 def main():
     runt.run_with_args(stock_spot_buy)
     runt.run_with_args(save_nph_stock_top_data)
     runt.run_with_args(save_stock_blocktrade_data)
     runt.run_with_args(save_nph_stock_bonus)
     runt.run_with_args(save_nph_stock_fundflow_data)
+    if len(sys.argv) == 1:
+        _retry_recent_external_data()
 
 
 # main函数入口

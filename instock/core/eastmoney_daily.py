@@ -344,7 +344,11 @@ def _daily_fetch(dataset, date_key, fetcher, after_close=True, eastmoney=False):
                 logging.error("Eastmoney cache read failed for %s: %s", dataset, exc)
                 return None
         if os.path.exists(marker_path):
-            return None
+            marker = _read_json(marker_path, {})
+            status = marker.get("status")
+            if status not in {"blocked", "deferred", "failed", "started"}:
+                return None
+            logging.info("Retrying external dataset %s for %s after %s", dataset, date_key, status)
 
         remaining = _provider_cooldown_remaining() if eastmoney else 0
         if remaining > 0:

@@ -26,6 +26,15 @@ class MyEncoder(json.JSONEncoder):
             return json.JSONEncoder.default(self, obj)
 
 
+def _table_exists(db, table_name):
+    rows = db.query(
+        'SELECT 1 FROM information_schema.tables '
+        'WHERE table_schema = DATABASE() AND table_name = %s LIMIT 1',
+        table_name,
+    )
+    return bool(rows)
+
+
 class GetStockDatesHandler(webBase.BaseHandler):
     """Bounded, short-lived cache of indexed date-only month queries."""
     cache = OrderedDict()
@@ -59,10 +68,14 @@ class GetStockDatesHandler(webBase.BaseHandler):
             self.write({'dates': cached[1], 'ttl': self.ttl})
             return
         try:
-            rows = self.db.query(
-                f'SELECT DISTINCT `date` FROM `{module.table_name}` '
-                'WHERE `date` >= %s AND `date` < %s ORDER BY `date`', start, end)
-            dates = [row['date'].strftime('%Y-%m-%d') for row in rows]
+            db = self.db
+            if _table_exists(db, module.table_name):
+                rows = db.query(
+                    f'SELECT DISTINCT `date` FROM `{module.table_name}` '
+                    'WHERE `date` >= %s AND `date` < %s ORDER BY `date`', start, end)
+                dates = [row['date'].strftime('%Y-%m-%d') for row in rows]
+            else:
+                dates = []
         except Exception:
             logging.exception('Calendar query failed: %s', name)
             self.set_status(503)
@@ -103,6 +116,18 @@ class GetStockDataHandler(webBase.BaseHandler, ABC):
         web_module_data = sswmd.stock_web_module_data().get_data(name)
         # https://datatables.net/manual/server-side
         self.set_header('Content-Type', 'application/json;charset=UTF-8')
+        db = self.db
+        draw_param = self.get_argument('draw', None)
+        try:
+            draw = int(draw_param) if draw_param is not None else None
+        except (TypeError, ValueError):
+            draw = 0
+        if not _table_exists(db, web_module_data.table_name):
+            obj = {"recordsTotal": 0, "recordsFiltered": 0, "data": []}
+            if draw is not None:
+                obj['draw'] = draw
+            self.write(json.dumps(obj, cls=MyEncoder))
+            return
         order_by_column = []
         order_by_dir = []
         # 支持多排序。使用shift+鼠标左键。
@@ -174,12 +199,14 @@ class GetStockDataHandler(webBase.BaseHandler, ABC):
         sql = " SELECT * FROM `%s` %s %s %s " % (web_module_data.table_name, search_sql, order_by_sql, limit_sql)
         count_sql = " SELECT count(1) as num FROM `%s` %s " % (web_module_data.table_name, search_sql)
 
-        stock_web_list = self.db.query(sql)
-        stock_web_size = self.db.query(count_sql)
+        stock_web_list = db.query(sql)
+        stock_web_size = db.query(count_sql)
 
         obj = {
             "recordsTotal": stock_web_size[0]["num"],
             "recordsFiltered": stock_web_size[0]["num"],
             "data": stock_web_list
         }
+        if draw is not None:
+            obj['draw'] = draw
         self.write(json.dumps(obj, cls=MyEncoder))

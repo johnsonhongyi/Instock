@@ -48,6 +48,16 @@ def prepare(date, strategy):
         strategy_func = strategy['func']
         results = run_check(strategy_func, table_name, stocks_data, date)
         if results is None:
+            scan = _last_scan
+            if (stocks_data
+                    and scan.get('checked') == len(stocks_data)
+                    and scan.get('matched') == 0
+                    and scan.get('errors', 0) == 0
+                    and mdb.checkTableIsExist(table_name)):
+                mdb.executeSql(
+                    f"DELETE FROM `{table_name}` WHERE `date` = %s",
+                    (date.strftime("%Y-%m-%d"),),
+                )
             return
 
         # 删除老数据。
