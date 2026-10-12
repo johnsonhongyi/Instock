@@ -36,7 +36,7 @@ class GetStockDatesHandler(webBase.BaseHandler):
         month = self.get_argument('month', '')
         modules = sswmd.stock_web_module_data().get_data_list()
         module = next((item for item in modules if item.table_name == name
-                       and item.type == '股票策略数据' and 'date' in item.columns), None)
+                       and item.mode == 'query' and 'date' in item.columns), None)
         try:
             first = datetime.datetime.strptime(month, '%Y-%m').date().replace(day=1)
             if first.strftime('%Y-%m') != month:
@@ -50,7 +50,7 @@ class GetStockDatesHandler(webBase.BaseHandler):
             return
         if module is None:
             self.set_status(400)
-            self.write({'dates': [], 'error': 'Invalid strategy'})
+            self.write({'dates': [], 'error': 'Invalid table'})
             return
         key = (name, month)
         cached = self.cache.get(key)
@@ -64,7 +64,7 @@ class GetStockDatesHandler(webBase.BaseHandler):
                 'WHERE `date` >= %s AND `date` < %s ORDER BY `date`', start, end)
             dates = [row['date'].strftime('%Y-%m-%d') for row in rows]
         except Exception:
-            logging.exception('Strategy calendar query failed: %s', name)
+            logging.exception('Calendar query failed: %s', name)
             self.set_status(503)
             self.write({'dates': [], 'error': 'Calendar temporarily unavailable'})
             return

@@ -65,7 +65,6 @@
                 String(date.getDate()).padStart(2, '0')].join('-');
         }
         function loadCalendar(date) {
-            if (!isStrategy) return;
             const month = dateKey(date).slice(0, 7);
             calendarMonth = month;
             const key = 'instock.calendar.' + nameParam + '.' + month;
@@ -113,7 +112,7 @@
             selectOtherMonths: false,
             autoclose: true,
             beforeShowDay: function(date) {
-                return calendarDates.has(dateKey(date)) ? {classes: 'has-stock-data', tooltip: '该策略当日有数据'} : {};
+                return calendarDates.has(dateKey(date)) ? {classes: 'has-stock-data', tooltip: '当日有数据'} : {};
             },
 			todayHighlight: true,
 			onSelect: function(selected,evnt) {
