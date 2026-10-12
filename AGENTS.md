@@ -1,6 +1,6 @@
 # Agent Quick Context
 
-For work involving PVE, Docker deployment, or TDX market files, read [ENVIRONMENT_HANDOFF.md](ENVIRONMENT_HANDOFF.md) first.
+For work involving PVE, Docker deployment, or TDX market files, read [the Docker release/data policy](docs/DOCKER_RELEASE_AND_DATA.md) and [the dated environment handoff](instock/ENVIRONMENT_HANDOFF.md) first.
 
 - The Windows checkout is not the production Docker host. Docker runs on PVE inside LXC 102.
 - Verify live container, image, and mount state before changing production; the handoff records a dated snapshot and can become stale.
