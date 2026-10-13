@@ -329,9 +329,6 @@ def _call_eastmoney(fetcher):
 
 
 def _daily_fetch(dataset, date_key, fetcher, after_close=True, eastmoney=False):
-    if after_close and not _is_after_close_today(date_key):
-        return None
-
     dataset = re.sub(r'[^A-Za-z0-9_.-]', '_', str(dataset))
     os.makedirs(_CACHE_DIR, exist_ok=True)
     cache_path = os.path.join(_CACHE_DIR, "%s-%s.pkl" % (dataset, date_key))
@@ -343,10 +340,14 @@ def _daily_fetch(dataset, date_key, fetcher, after_close=True, eastmoney=False):
             except Exception as exc:
                 logging.error("Eastmoney cache read failed for %s: %s", dataset, exc)
                 return None
+        # A saved historical snapshot is safe to reuse; live-only fetchers must
+        # still never label today's data with a previous date.
+        if after_close and not _is_after_close_today(date_key):
+            return None
         if os.path.exists(marker_path):
             marker = _read_json(marker_path, {})
             status = marker.get("status")
-            if status not in {"blocked", "deferred", "failed", "started"}:
+            if not isinstance(status, str) or status not in {"blocked", "deferred", "failed", "started"}:
                 return None
             logging.info("Retrying external dataset %s for %s after %s", dataset, date_key, status)
 

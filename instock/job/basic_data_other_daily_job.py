@@ -200,10 +200,16 @@ def _retry_recent_external_data():
             try:
                 marker_date = datetime.date.fromisoformat(date_text)
                 with open(marker_path, 'r', encoding='utf-8') as stream:
-                    status = json.load(stream).get('status')
+                    marker = json.load(stream)
+                status = marker.get('status') if isinstance(marker, dict) else None
             except (OSError, ValueError, TypeError):
                 continue
-            if oldest <= marker_date < today and status in {'blocked', 'deferred'}:
+            cached = os.path.isfile(os.path.splitext(marker_path)[0] + '.pkl')
+            # Only block trades have a genuine dated historical API. Bonus and
+            # fund-flow history may be restored only from their saved snapshot.
+            recoverable = dataset == 'stock-blocktrade' or cached
+            if (oldest <= marker_date < today and recoverable and isinstance(status, str)
+                    and status in {'blocked', 'deferred', 'failed', 'started'}):
                 pending.setdefault(marker_date, set()).add(dataset)
 
     if not pending:
@@ -213,7 +219,10 @@ def _retry_recent_external_data():
     for dataset, fetcher in fetchers.items():
         if dataset in pending[retry_date]:
             logging.info('retrying deferred external data: dataset=%s date=%s', dataset, retry_date)
-            fetcher(retry_date)
+            try:
+                fetcher(retry_date)
+            except Exception:
+                logging.exception('external recovery failed: dataset=%s date=%s', dataset, retry_date)
 
 
 def main():

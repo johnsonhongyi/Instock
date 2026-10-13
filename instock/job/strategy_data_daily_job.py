@@ -7,6 +7,7 @@ import pandas as pd
 import os.path
 import sys
 import time
+import threading
 from collections import Counter
 
 cpath_current = os.path.dirname(os.path.dirname(__file__))
@@ -23,6 +24,7 @@ from instock.job.run_statistics import RunStatistics
 
 _run_stats = None
 _last_scan = {}
+_scan_context = threading.local()
 _run_errors = []
 
 __author__ = 'myh '
@@ -32,6 +34,7 @@ __date__ = '2023/3/10 '
 def prepare(date, strategy):
     global _last_scan
     _last_scan = {}
+    _scan_context.last_scan = {}
     started = time.perf_counter()
     strategy_started = None
     error = None
@@ -48,11 +51,11 @@ def prepare(date, strategy):
         strategy_func = strategy['func']
         results = run_check(strategy_func, table_name, stocks_data, date)
         if results is None:
-            scan = _last_scan
+            scan = _scan_context.last_scan
             if (stocks_data
                     and scan.get('checked') == len(stocks_data)
                     and scan.get('matched') == 0
-                    and scan.get('errors', 0) == 0
+                    and scan.get('errors') == 0
                     and mdb.checkTableIsExist(table_name)):
                 mdb.executeSql(
                     f"DELETE FROM `{table_name}` WHERE `date` = %s",
@@ -86,12 +89,13 @@ def prepare(date, strategy):
     finally:
         if _run_stats:
             _run_stats.stage(strategy['name'], strategy_started or started, date=str(date),
-                             scan=dict(_last_scan), error=error)
+                             scan=dict(_scan_context.last_scan), error=error)
 
 
 def run_check(strategy_fun, table_name, stocks, date, workers=2):
     global _last_scan
     _last_scan = {}
+    _scan_context.last_scan = {}
     started = time.perf_counter()
     is_check_high_tight = False
     if strategy_fun.__name__ == 'check_high_tight':
@@ -129,8 +133,9 @@ def run_check(strategy_fun, table_name, stocks, date, workers=2):
     if error_counts:
         logging.error('strategy scan errors: strategy=%s types=%s samples=%s',
                       table_name, dict(error_counts), error_samples)
-    _last_scan = dict(checked=checked, matched=len(data), errors=sum(error_counts.values()),
-                      error_types=dict(error_counts), seconds=round(time.perf_counter() - started, 3), workers=workers)
+    _scan_context.last_scan = dict(checked=checked, matched=len(data), errors=sum(error_counts.values()),
+                                  error_types=dict(error_counts), seconds=round(time.perf_counter() - started, 3), workers=workers)
+    _last_scan = dict(_scan_context.last_scan)
     if error_counts:
         _run_errors.append('%s: %s stock errors' % (table_name, sum(error_counts.values())))
     if not data:

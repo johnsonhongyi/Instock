@@ -923,7 +923,7 @@ def fetch_stock_blocktrade_data(date):
             return data
 
         return fetch_external_once('stock-blocktrade', date, fetcher,
-                                   after_close=True, eastmoney=True)
+                                   after_close=date.strftime('%Y-%m-%d') >= datetime.date.today().isoformat(), eastmoney=True)
     except TypeError:
         logging.error("处理异常：目前还没有大宗交易数据，请17:00点后再获取！")
         return None

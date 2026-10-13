@@ -28,10 +28,18 @@ def load_trade_time_module():
 
 class _Calendar:
     def __init__(self, values):
-        self.values = values
+        self.values = sorted(datetime.datetime.strptime(value.replace('-', ''), '%Y%m%d').date() for value in values)
 
-    def get_data(self):
-        return self.values
+    def is_trade_date(self, value):
+        return datetime.date.fromisoformat(value) in self.values
+
+    def get_pre_trade_date(self, value):
+        target = datetime.date.fromisoformat(value)
+        return next((date.isoformat() for date in reversed(self.values) if date < target), None)
+
+    def get_next_trade_date(self, value):
+        target = datetime.date.fromisoformat(value)
+        return next((date.isoformat() for date in self.values if date > target), None)
 
 
 class TradeTimeCalendarTests(unittest.TestCase):
@@ -40,7 +48,8 @@ class TradeTimeCalendarTests(unittest.TestCase):
         cls.trade_time = load_trade_time_module()
 
     def setUp(self):
-        self.trade_time.stock_trade_date = lambda: _Calendar([
+        # Match the current TK adapter contract without reading its real calendar.
+        self.trade_time._a_trade_calendar = _Calendar([
             '2026-10-08', '2026-10-09', '20261012',
         ])
 
@@ -66,13 +75,13 @@ class TradeTimeCalendarTests(unittest.TestCase):
         )
 
     def test_missing_previous_date_fails_without_underflow(self):
-        self.trade_time.stock_trade_date = lambda: _Calendar(['2026-10-09'])
+        self.trade_time._a_trade_calendar = _Calendar(['2026-10-09'])
         with self.assertRaises(LookupError):
             self.trade_time.get_previous_trade_date(datetime.date.min)
 
     def test_unavailable_calendar_preserves_existing_fallback(self):
         value = datetime.date(2026, 10, 11)
-        self.trade_time.stock_trade_date = lambda: _Calendar(None)
+        self.trade_time._a_trade_calendar = None
         self.assertEqual(self.trade_time.get_previous_trade_date(value), value)
 
 

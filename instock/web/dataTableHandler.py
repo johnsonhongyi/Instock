@@ -2,8 +2,10 @@
 # -*- coding: utf-8 -*-
 
 import json
+import re
 from abc import ABC
 from tornado import gen
+from tornado.web import HTTPError
 # import logging
 import datetime
 import time
@@ -33,6 +35,48 @@ def _table_exists(db, table_name):
         table_name,
     )
     return bool(rows)
+
+
+def _query_parts(handler, module):
+    """Keep identifiers allowlisted and all request values out of SQL text."""
+    try:
+        start = int(handler.get_argument('start', '0'))
+        length = int(handler.get_argument('length', '10'))
+        if start < 0 or length < -1:
+            raise ValueError('Invalid pagination')
+        filters, values, orders = [], [], []
+        filtered_date = False
+        sort_columns = {}
+        for key in handler.request.arguments:
+            match = re.fullmatch(r'columns\[(\d+)\]\[search\]\[value\]', key)
+            if match:
+                index = int(match[1])
+                if index >= len(module.columns):
+                    raise ValueError('Invalid column')
+                value = handler.get_argument(key, strip=False)
+                if value:
+                    column = module.columns[index]
+                    filtered_date = filtered_date or column == 'date'
+                    filters.append(f'`{column}` = %s' if column == 'date' else f'`{column}` LIKE %s')
+                    values.append(value if column == 'date' else '%' + value + '%')
+            match = re.fullmatch(r'order\[(\d+)\]\[column\]', key)
+            if match:
+                sort_columns[int(match[1])] = int(handler.get_argument(key))
+        date = handler.get_argument('date', None, strip=False)
+        if not filtered_date and date is not None and 'date' in module.columns:
+            filters.append('`date` = %s')
+            values.append(date)
+        for order, index in sorted(sort_columns.items()):
+            direction = handler.get_argument(f'order[{order}][dir]', '').upper()
+            if not 0 <= index < len(module.columns) or direction not in ('ASC', 'DESC'):
+                raise ValueError('Invalid order')
+            orders.append(f'`{module.columns[index]}` {direction}')
+    except (ValueError, TypeError):
+        raise HTTPError(400, reason='Invalid table query parameters') from None
+    where = ' WHERE ' + ' AND '.join(filters) if filters else ''
+    order = ' ORDER BY ' + ', '.join(orders) if orders else ''
+    limit = ' LIMIT %s, %s' if length > 0 else ''
+    return where, order, limit, values, ([start, length] if length > 0 else [])
 
 
 class GetStockDatesHandler(webBase.BaseHandler):
@@ -109,11 +153,14 @@ class GetStockHtmlHandler(webBase.BaseHandler, ABC):
 class GetStockDataHandler(webBase.BaseHandler, ABC):
     def get(self):
         # 获得分页参数。
-        start_param = self.get_argument("start", default=0, strip=False)
-        length_param = self.get_argument("length", default=10, strip=False)
         name = self.get_argument("name", default=None, strip=False)
-        date = self.get_argument("date", default=None, strip=False)
-        web_module_data = sswmd.stock_web_module_data().get_data(name)
+        try:
+            web_module_data = sswmd.stock_web_module_data().get_data(name)
+            if web_module_data.mode != 'query':
+                raise KeyError(name)
+        except KeyError:
+            raise HTTPError(400, reason='Invalid table') from None
+        search_sql, order_by_sql, limit_sql, values, pagination = _query_parts(self, web_module_data)
         # https://datatables.net/manual/server-side
         self.set_header('Content-Type', 'application/json;charset=UTF-8')
         db = self.db
@@ -128,79 +175,11 @@ class GetStockDataHandler(webBase.BaseHandler, ABC):
                 obj['draw'] = draw
             self.write(json.dumps(obj, cls=MyEncoder))
             return
-        order_by_column = []
-        order_by_dir = []
-        # 支持多排序。使用shift+鼠标左键。
-        for item, val in self.request.arguments.items():
-            if str(item).startswith("order[") and str(item).endswith("[column]"):
-                order_by_column.append(int(val[0]))
-            if str(item).startswith("order[") and str(item).endswith("[dir]"):
-                order_by_dir.append(val[0].decode("utf-8"))  # bytes转换字符串
-
-        search_by_column = []
-        search_by_data = []
-
-        # 返回search字段。
-        for item, val in self.request.arguments.items():
-            if str(item).startswith("columns[") and str(item).endswith("[search][value]"):
-                str_idx = item.replace("columns[", "").replace("][search][value]", "")
-                int_idx = int(str_idx)
-                # 找到字符串
-                str_val = val[0].decode("utf-8")
-                if str_val != "":  # 字符串。
-                    search_by_column.append(web_module_data.columns[int_idx])
-                    search_by_data.append(val[0].decode("utf-8"))  # bytes转换字符串
-
-        # 打印日志。
-        search_sql = ""
-        search_idx = 0
-        isHasDate = False
-        for item in search_by_column:
-            val = search_by_data[search_idx]
-            # 查询sql
-            if search_idx == 0:
-                if item == 'date':
-                    search_sql = f" WHERE `{item}` = '{val}'"
-                    isHasDate = True
-                else:
-                    search_sql = f" WHERE `{item}` like '%%{val}%%'"
-            else:
-                if item == 'date':
-                    search_sql = f"{search_sql} AND `{item}` == '{val}'"
-                    isHasDate = True
-                else:
-                    search_sql = f"{search_sql} AND `{item}` like '%%{val}%%'"
-            search_idx = search_idx + 1
-
-        if not isHasDate and date is not None:
-            if search_idx == 0:
-                search_sql = f" WHERE `date` = '{date}'"
-            else:
-                search_sql = f"{search_sql} AND `date` = '{date}'"
-
-        order_by_sql = ""
-        # 增加排序。
-        if len(order_by_column) != 0 and len(order_by_dir) != 0:
-            order_by_sql = "  ORDER BY "
-            idx = 0
-            for key in order_by_column:
-                # 找到排序字段和dir。
-                col_tmp = web_module_data.columns[key]
-                dir_tmp = order_by_dir[idx]
-                if idx != 0:
-                    order_by_sql = f"{order_by_sql} ,`{col_tmp}` {dir_tmp}"
-                else:
-                    order_by_sql = f"{order_by_sql} `{col_tmp}` {dir_tmp}"
-                idx += 1
-        # 查询数据库。
-        limit_sql = ""
-        if int(length_param) > 0:
-            limit_sql = " LIMIT %s , %s " % (start_param, length_param)
         sql = " SELECT * FROM `%s` %s %s %s " % (web_module_data.table_name, search_sql, order_by_sql, limit_sql)
         count_sql = " SELECT count(1) as num FROM `%s` %s " % (web_module_data.table_name, search_sql)
 
-        stock_web_list = db.query(sql)
-        stock_web_size = db.query(count_sql)
+        stock_web_list = db.query(sql, *(values + pagination))
+        stock_web_size = db.query(count_sql, *values)
 
         obj = {
             "recordsTotal": stock_web_size[0]["num"],
