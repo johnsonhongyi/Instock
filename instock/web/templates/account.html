@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ '登录' if login else '用户管理' }} · InStock</title>
+<link rel="stylesheet" href="/static/css/bootstrap.min-3.4.1.css">
+<style>body{background:#eef2f6;color:#263445;font-family:Arial,sans-serif;padding:32px 16px}.account{max-width:760px;margin:auto;background:white;padding:28px;border-radius:12px}form{margin:20px 0;padding:16px;border:1px solid #dce3eb;border-radius:8px}label{display:block;margin:12px 0}input,select,button{padding:8px;max-width:100%}input:not([type=checkbox]){display:block;width:100%;box-sizing:border-box}button{cursor:pointer;background:#2463a5;color:white;border:0;border-radius:4px}.error{color:#b3261e}table{width:100%;text-align:left}a{color:#2463a5}</style></head>
+<body><main class="account">
+<h1>{{ '登录 InStock' if login else '用户管理 / 修改密码' }}</h1>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% end %}
+{% if login %}
+<form method="post" action="/login">
+{% raw xsrf_form_html() %}
+<label>用户名<input name="username" required maxlength="64" autocomplete="username"></label>
+<label>密码<input name="password" type="password" required maxlength="256" autocomplete="current-password"></label>
+<button type="submit">登录</button></form>
+{% else %}
+<p>当前用户：{{ current_user['name'] }} · <a href="/instock/">返回首页</a></p>
+<form method="post">{% raw xsrf_form_html() %}<input type="hidden" name="action" value="logout"><button>退出登录</button></form>
+<h2>修改自己的密码</h2>
+<form method="post">{% raw xsrf_form_html() %}<input type="hidden" name="action" value="password">
+<label>原密码<input name="old_password" type="password" required autocomplete="current-password"></label>
+<label>新密码<input name="password" type="password" required minlength="8" maxlength="256" autocomplete="new-password"></label>
+<button>修改并重新登录</button></form>
+{% if current_user['admin'] %}
+<h2>用户列表</h2><table><thead><tr><th>用户名</th><th>权限</th></tr></thead><tbody>
+{% for user in users %}<tr><td>{{ user['name'] }}</td><td>{{ '管理员' if user['admin'] else '普通用户' }}</td></tr>{% end %}
+</tbody></table>
+<h2>添加用户</h2>
+<form method="post">{% raw xsrf_form_html() %}<input type="hidden" name="action" value="add">
+<label>用户名<input name="username" required maxlength="64" autocomplete="off"></label>
+<label>初始密码<input name="password" type="password" required minlength="8" maxlength="256" autocomplete="new-password"></label>
+<label><input name="admin" type="checkbox" value="1"> 管理员</label><button>添加用户</button></form>
+<h2>重置其他用户密码</h2>
+<form method="post">{% raw xsrf_form_html() %}<input type="hidden" name="action" value="password">
+<label>用户<select name="username">{% for user in users %}{% if user['name'] != current_user['name'] %}<option>{{ user['name'] }}</option>{% end %}{% end %}</select></label>
+<label>新密码<input name="password" type="password" required minlength="8" maxlength="256" autocomplete="new-password"></label>
+<button>重置密码</button></form>
+{% end %}{% end %}
+</main></body></html>

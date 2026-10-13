@@ -3,6 +3,7 @@
 
 from abc import ABC
 import tornado.web
+from instock.web.auth import AuthMixin
 import instock.core.singleton_stock_web_module_data as sswmd
 
 __author__ = 'myh '
@@ -10,7 +11,7 @@ __date__ = '2023/3/10 '
 
 
 # 基础handler，主要负责检查mysql的数据库链接。
-class BaseHandler(tornado.web.RequestHandler, ABC):
+class BaseHandler(AuthMixin, tornado.web.RequestHandler, ABC):
     @property
     def db(self):
         try:

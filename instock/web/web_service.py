@@ -34,6 +34,7 @@ import instock.lib.version as version
 import instock.web.dataTableHandler as dataTableHandler
 import instock.web.dataIndicatorsHandler as dataIndicatorsHandler
 import instock.web.base as webBase
+from instock.web.auth import AccountHandler, UserStore
 import instock.core.singleton_stock_web_module_data as sswmd
 from instock.job.run_statistics import history, save, now
 from instock.job.strategy_selection import selection, validate_selection
@@ -45,7 +46,11 @@ __date__ = '2023/3/10 '
 
 class Application(tornado.web.Application):
     def __init__(self):
+        self.users = UserStore(os.environ.get('INSTOCK_AUTH_DB', os.path.join(cpath_current, 'cache', 'auth', 'users.sqlite3')))
+        self.login_attempts = {}
         handlers = [
+            (r"/login", AccountHandler),
+            (r"/instock/users", AccountHandler),
             # 设置路由
             (r"/", HomeHandler),
             (r"/instock/", HomeHandler),
@@ -64,8 +69,8 @@ class Application(tornado.web.Application):
             static_path=os.path.join(os.path.dirname(__file__), "static"),
             xsrf_cookies=False,  # True,
             # cookie加密
-            cookie_secret="027bb1b670eddf0392cdda8709268a17b58b7",
-            debug=True,
+            cookie_secret=self.users.secret,
+            debug=False,
         )
         super(Application, self).__init__(handlers, **settings)
         self.manual_strategy_refresh_lock = threading.Lock()
