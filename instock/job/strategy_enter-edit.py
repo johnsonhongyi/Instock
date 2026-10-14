@@ -377,6 +377,7 @@ def _stream_strategy_enter(small, stats, selected):
                 break
             previous -= datetime.timedelta(days=1)
         history_gaps = [0]
+        overlay_counts = dict(requested=0, merged=0, rejected=0)
         if str(date) == latest and epoch:
             os.environ['INSTOCK_HISTORY_CACHE_EPOCH'] = epoch
         else:
@@ -456,7 +457,11 @@ def _stream_strategy_enter(small, stats, selected):
                     frame.date < pd.Timestamp(date), 'volume'], errors='coerce').dropna().tail(5).tolist()
                     for stock, frame in frames.items()}
                 subset = apply_dynamic_volume_ratio(subset, histories, now=now)
+                overlay_counts['requested'] += len(frames)
+                requested_count = len(frames)
                 frames = stocks_data_to_realtime(date, frames, subset)
+                overlay_counts['merged'] += len(frames)
+                overlay_counts['rejected'] += requested_count - len(frames)
             elif frames:
                 # A premarket baseline can end yesterday. On holidays/after close,
                 # append the persisted last trading bar without rebuilding history.
@@ -511,7 +516,10 @@ def _stream_strategy_enter(small, stats, selected):
             entries = {name: dict(results=matches, scan=stages[name]['scan'], dependency=dependencies.get(name))
                        for name, matches in results.items()}
             static_cache.save(cache_key(), entries, loaded, len(stocks), history_gaps[0])
-        stats.progress(date=str(date), history_gap_stocks=history_gaps[0])
+        stats.progress(date=str(date), history_gap_stocks=history_gaps[0],
+                       realtime_overlay=overlay_counts)
+        logging.info('Strategy input complete: date=%s live=%s overlay=%s',
+                     date, live, overlay_counts)
     if not small and selected is None:
         if os.environ.get('INSTOCK_DEFER_BACKTEST') == '1':
             stats.progress(backtest_deferred=True, history_gap_stocks=history_gaps[0],

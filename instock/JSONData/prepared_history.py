@@ -36,16 +36,14 @@ def _load_manifest(parent_dir):
 
 
 def save_manifest(directory):
-    """Scan directory and aggregate all *-1000 and *-600 into a single manifest.json."""
+    """Aggregate metadata by exact cache filename, including legacy profiles."""
     parent = Path(directory)
     manifest = {}
-    for rows in (1000, 600, UNIFIED_BASE_ROWS):
-        for meta_file in parent.glob(f'*-{rows}.meta.json'):
-            symbol = meta_file.name.split('-')[0]
-            if symbol not in manifest:
-                info = _load_metadata(meta_file)
-                if info:
-                    manifest[symbol] = info
+    for meta_file in parent.glob('*.meta.json'):
+        info = _load_metadata(meta_file)
+        if info:
+            stat = meta_file.stat()
+            manifest[meta_file.name] = dict(info, _metadata_stamp=[stat.st_size, stat.st_mtime_ns])
 
     if not manifest:
         return None
@@ -75,21 +73,21 @@ def is_history_cache_ready(directory=None, min_entries=3000):
         if not directory:
             return False
         manifest = _load_manifest(directory)
-        return bool(manifest and len(manifest) >= min_entries)
+        return bool(manifest and len({key.split('-')[0] for key in manifest}) >= min_entries)
     except Exception:
         return False
 
 
 def _load_metadata(metadata_path, symbol=None, parent=None):
-    # 1. 优先从集中式 manifest 中获取（0 磁盘 I/O）
-    if parent is not None and symbol is not None:
-        manifest = _load_manifest(parent)
-        if manifest and symbol in manifest:
-            return manifest[symbol]
-
-    # 2. 回退到单文件 meta.json
+    # A legacy symbol-only manifest may refer to a different profile. Never
+    # use it for another array, or after an atomic metadata replacement.
     try:
         stat = os.stat(metadata_path)
+        if parent is not None and symbol is not None:
+            manifest = _load_manifest(parent)
+            info = (manifest or {}).get(Path(metadata_path).name)
+            if info and info.get('_metadata_stamp') == [stat.st_size, stat.st_mtime_ns]:
+                return info
         cache_key = (str(metadata_path), stat.st_mtime_ns)
         cached = _METADATA_CACHE.get(cache_key)
         if cached is not None:
@@ -131,7 +129,8 @@ def prepared_history(cache_path, fingerprint, loader, *, _lookback=None, _allow_
         cand_version = json.dumps(cand_signature, ensure_ascii=False, sort_keys=True)
 
         # 校验版本签名或盘前同一 epoch 基线
-        version_matched = (info.get('version') == cand_version)
+        version_matched = (info.get('version') == cand_version
+                           and info.get('source_version') == source_version)
         epoch_matched = bool(epoch and source_version and info.get('source_version') == source_version
                              and info.get('profile') == json.dumps(cand_signature[:2]))
 
@@ -159,7 +158,7 @@ def prepared_history(cache_path, fingerprint, loader, *, _lookback=None, _allow_
             try:
                 total_len = len(mapped)
                 # 核心机制：向下自动零拷贝裁切！仅提取末尾 lookback 行
-                slice_len = min(total_len, lookback)
+                slice_len = total_len if epoch else min(total_len, lookback)
                 sub_mapped = mapped[-slice_len:] if total_len > slice_len else mapped
 
                 values = {}
@@ -179,6 +178,14 @@ def prepared_history(cache_path, fingerprint, loader, *, _lookback=None, _allow_
                 from instock.JSONData.history_cache import _count
             except ImportError:
                 from JSONData.history_cache import _count
+            if epoch:
+                days = pd.to_datetime(frame['date'], errors='coerce')
+                if fingerprint[0]:
+                    frame = frame.loc[days >= pd.Timestamp(fingerprint[0])]
+                    days = days.loc[frame.index]
+                if fingerprint[1]:
+                    frame = frame.loc[days <= pd.Timestamp(fingerprint[1])]
+                frame = frame.tail(lookback).reset_index(drop=True)
             _count('prepared_hits')
             return frame
         except (OSError, ValueError, KeyError, TypeError) as exc:

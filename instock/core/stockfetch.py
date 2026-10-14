@@ -1278,7 +1278,20 @@ def backfill_tdx_daily_data(data, date, return_stats=False, asset_type='stock'):
 def stocks_data_to_realtime(date, stocks_data, realdf):
     """将实盘/快照行情增量拼接到股票历史数据中（标准通用函数，严格保证DRY与类型安全）"""
     stocks_data = dict(stocks_data)
+    requested_count = len(stocks_data)
     realdf = realdf.copy()
+    target_day = pd.Timestamp(date).normalize()
+    quote_days = pd.to_datetime(realdf['date'], errors='coerce').dt.normalize()
+    valid = quote_days.eq(target_day)
+    for column in ('new_price', 'open_price', 'high_price', 'low_price'):
+        values = pd.to_numeric(realdf[column], errors='coerce')
+        valid &= np.isfinite(values) & values.gt(0)
+    rejected = int((~valid).sum())
+    if rejected:
+        logging.warning('Realtime overlay rejected invalid/date-mismatched quotes: date=%s count=%s',
+                        target_day.date(), rejected)
+    realdf = realdf.loc[valid].copy()
+    realdf['date'] = target_day
     realdf['open'] = realdf['open_price']
     realdf['high'] = realdf['high_price']
     realdf['low'] = realdf['low_price']
@@ -1305,7 +1318,7 @@ def stocks_data_to_realtime(date, stocks_data, realdf):
         new_key = (rundate, code, name)
         if code not in realdf.index:
             continue
-        data = realdf.loc[[code], h_col].copy()
+        data = realdf.loc[[code], list(h_col)].copy()
         if 'volume_ratio' in realdf.columns:
             data['volume_ratio'] = realdf.loc[code, 'volume_ratio']
         pr_value = pd.concat([pr_value, data], axis=0).reset_index(drop=True)
@@ -1317,6 +1330,8 @@ def stocks_data_to_realtime(date, stocks_data, realdf):
         pr_value['date'] = pd.to_datetime(pr_value.date, format='%Y-%m-%d')
         stocks_data[new_key] = pr_value
 
+    logging.debug('Realtime overlay complete: date=%s histories=%s merged=%s rejected=%s',
+                  rundate, requested_count, len(stocks_data), rejected)
     return stocks_data
 
 
