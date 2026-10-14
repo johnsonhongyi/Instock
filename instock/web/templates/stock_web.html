@@ -169,18 +169,30 @@
             },
             "columns": [
                 {% for column in web_module_data.columns %}
-                {% if column == 'code' %}
+                {% if column == 'date' %}
                 {
                     "data": "{{ column }}", "render": function (data, type, row, meta) {
-                        data = '<a href="/instock/data/indicators?code=' + data + '&date=' + row.date + '&name=' + row.name + '" target="_blank">' + data + '</a>';
-                        return data;
+                        if (type !== 'display') return data;
+                        return $('<a>', {href: 'https://quote.eastmoney.com/' + encodeURIComponent(row.code) + '.html',
+                            target: '_blank', rel: 'noopener noreferrer', title: '查看东方财富行情'}).text(data).prop('outerHTML');
+                    }
+                },
+                {% elif column == 'code' %}
+                {
+                    "data": "{{ column }}", "render": function (data, type, row, meta) {
+                        if (type !== 'display') return data;
+                        const url = '/instock/data/indicators?' + new URLSearchParams({code: data, date: row.date, name: row.name});
+                        return $('<span>', {'data-quote-url': url, 'class': 'stock-code-link',
+                            title: 'Ctrl+单击查看证券指标；普通单击不跳转'}).text(data).prop('outerHTML');
                     }
                 },
 		               {% elif column == 'name' %}
                 {
                     "data": "{{ column }}", "render": function (data, type, row, meta) {
-                        data = '<a href="https://quote.eastmoney.com/'+row.code+'.html" target="_blank">'+row.name+'</a>';
-                        return data;
+                        if (type !== 'display') return data;
+                        return $('<span>', {'data-quote-url': 'https://quote.eastmoney.com/' + encodeURIComponent(row.code) + '.html',
+                            'class': 'stock-name-link',
+                            title: 'Ctrl+单击查看东方财富行情；普通单击不跳转'}).text(data).prop('outerHTML');
                     }
                 },
 
@@ -212,6 +224,20 @@
                 {% end %}
             ]
         });
+
+        $(document).off('click.stockNameLink');
+        if (window.__instockStockLinkHandler) {
+            document.removeEventListener('click', window.__instockStockLinkHandler, true);
+        }
+        window.__instockStockLinkHandler = function(event) {
+            const link = event.target.closest('.stock-name-link, .stock-code-link');
+            if (link && event.ctrlKey && event.button === 0) {
+                event.preventDefault();
+                event.stopPropagation();
+                window.open(link.getAttribute('data-quote-url'), '_blank', 'noopener,noreferrer');
+            }
+        };
+        document.addEventListener('click', window.__instockStockLinkHandler, true);
 
         $('input.column_filter').on( 'keyup', function () {
             const i = $(this).parents('div').attr('data-column');
